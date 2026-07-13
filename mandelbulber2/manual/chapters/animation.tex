@@ -119,4 +119,176 @@ The parameters of every single animation frame recorded in Flight Animation mode
 
 \subsection{Keyframe animation - workflow}\label{keyframe-animation}
 
-	This section will be written soon
+\emph{Keyframe animation} works by defining a set of keyframes, each containing a complete snapshot of all animated parameters (camera position, fractal settings, light positions, material properties, etc.). Mandelbulber then interpolates between these keyframes to generate every intermediate frame.
+
+This approach is ideal for animations that require precise control over the scene at specific points, such as camera movements, fractal morphing, or lighting transitions.
+
+\subsubsection{Opening the Keyframe animation editor}
+
+Open the \emph{Animation} dock from the top pull-down menu by activating \emph{View} / \emph{Show animation dock}. Switch to the \emph{Keyframe animation (only keyframes)} tab (picture \ref{keyframe-animation-dock}).
+
+\simpleImageWithCaption75Width{img/manual/media/keyframe_animation_dock.png}
+{Keyframe animation dock}
+{keyframe-animation-dock}{H}
+
+The dock is divided into three main areas: the control buttons on the left, the animation parameters panel below the buttons, and the keyframe table with the value chart on the right.
+
+\subsubsection{Adding parameters to animation}
+
+Before creating keyframes, you must tell Mandelbulber which parameters you want to animate. By default, no parameters are tracked.
+
+To add a parameter, right-click on its edit field in any panel (fractal, camera, lights, materials, etc.) and select \emph{Add to keyframe animation} from the context menu. The parameter will appear as a new row in the keyframe table.
+
+To add all currently non-default parameters at once, click the \emph{Add all parameters} button in the animation parameters panel.
+
+\subsubsection{Adding keyframes}
+
+\begin{enumerate}
+	\item Set up your scene (fractal, camera, lights, materials, etc.).
+	
+	\item Add the parameters you want to animate (see above).
+	
+	\item Click the \emph{Add keyframe} button to append a keyframe at the end of the animation. The current values of all tracked parameters are captured.
+	
+	\item Modify the parameters in the main window (e.g., move the camera, change the fractal power, adjust light positions).
+	
+	\item Click the \emph{Modify keyframe} button to update the selected keyframe with the new values.
+	
+	\item Repeat steps 2--4 to build your animation.
+	
+	\item To insert a keyframe at a specific position, select the target column in the table and click \emph{Insert keyframe}. The new keyframe will be placed before the selected one.
+\end{enumerate}
+
+Keyboard shortcuts: press \emph{K} to add a keyframe, \emph{M} to modify the selected keyframe.
+
+\subsubsection{Animation parameters panel}
+
+The parameters panel (left side of the dock) controls the overall animation timing and output (picture \ref{keyframe-animation-dock}):
+
+\begin{description}
+	\item[frames per keyframe] defines how many interpolated frames are generated between each keyframe. The total number of animation frames is calculated as: $(\text{number of keyframes} - 1) \times \text{frames per keyframe} + 1$. The last keyframe always has exactly one sub-frame (it is the endpoint). Default: 100.
+	
+	\item[frames per second] sets the animation playback speed. Default: 30 fps.
+	
+	\item[path for images] defines the output directory for rendered frames. Click \emph{Select folder} to choose a location.
+	
+	\item[image type] selects the image format for rendered frames (PNG, JPG, EXR, TIFF). Detailed format settings are in \emph{File} / \emph{Program preferences}.
+	
+	\item[first / last frame to render] limits the range of frames to render. Set to 0 to render all frames.
+	
+	\item[loop] enables seamless looping of the animation by interpolating between the last and first keyframes. Requires at least 3 keyframes.
+	
+	\item[show keyframe preview thumbnails] enables small preview images of each keyframe in the animation table.
+	
+	\item[show camera / target / light path] toggles visualization of the camera, target, and light movement paths in the 3D viewport.
+\end{description}
+
+\subsubsection{The keyframe table}
+
+The keyframe table (picture \ref{keyframe-table}) displays all keyframes as columns and all animated parameters as rows. Each cell contains the parameter value for that specific keyframe.
+
+\simpleImageWithCaption75Width{img/manual/media/keyframe_table_with_interpolation.png}
+{Keyframe animation table}
+{keyframe-table}{H}
+
+The table has reserved rows at the top (parameter names) and reserved columns at the left (frame numbers). The background color of each cell indicates the interpolation type for that parameter (see below).
+
+Every cell in the table is directly editable. When a value is being edited, the preview is refreshed in real time.
+
+\subsubsection{Interpolation types}
+
+Each animated parameter row has its own interpolation type, which controls how values transition between keyframes. To set the interpolation type, right-click on the parameter name in the row header (picture \ref{keyframe-table}) and choose from the context menu.
+
+The interpolation type is indicated by the background color of cells in that row:
+
+\begin{description}
+	\item[None] (white) -- no interpolation; the value remains constant until the next keyframe.
+	\item[Linear] (gray) -- straight-line interpolation between keyframe values.
+	\item[Linear angle] (gray/blue) -- linear interpolation with angle-aware rotation, designed for quaternion parameters.
+	\item[CatMulRom] (green) -- Catmull-Rom spline: produces a smooth C1 continuous curve passing through all keyframe values.
+	\item[CatMulRom angle] (green/blue) -- Catmull-Rom spline with angle-aware rotation.
+	\item[Akima] (red) -- Akima spline: smooth and monotonic, avoids overshoot. Useful for parameters that should not oscillate.
+	\item[Akima angle] (red/blue) -- Akima spline with angle-aware rotation.
+	\item[Cubic] (yellow) -- Cubic spline: produces a smooth C2 continuous curve.
+	\item[Cubic angle] (yellow/blue) -- Cubic spline with angle-aware rotation.
+	\item[Steffen] (blue) -- Steffen monotonic spline: prevents overshoot while maintaining smoothness.
+	\item[Steffen angle] (blue/blue) -- Steffen spline with angle-aware rotation.
+\end{description}
+
+The \emph{angle} variants are specifically designed for quaternion-based parameters (camera rotation) to avoid issues with short-path interpolation.
+
+\subsubsection{Editing values in the table}
+
+\begin{description}
+	\item[Direct editing] Click any cell to edit its value. The preview updates as you type.
+	
+	\item[Copy value to all keyframes] Right-click a cell and select \emph{Copy value to all keyframes} to copy that value to the same parameter across all keyframes.
+	
+	\item[Multiply / Increase values by] Select multiple cells (drag or shift-click), then right-click and choose \emph{Multiply values by...} or \emph{Increase values by...} to apply a scalar operation to all selected cells.
+	
+	\item[Interpolate keyframes] Right-click a cell and select \emph{Interpolate next keyframes} to create a smooth transition to a target value across subsequent keyframes.
+	
+	\item[Render this keyframe] Right-click a keyframe column header and select \emph{Render this keyframe} to render a preview of that frame.
+	
+	\item[Delete keyframes] Right-click a keyframe column header to delete that keyframe, or to \emph{Delete all keyframes to here} / \emph{Delete all keyframes from here} for bulk deletion.
+	
+	\item[Insert keyframe in between] Right-click a keyframe column header (not the first or second) and select \emph{Insert keyframe in between} to add a new keyframe at that position.
+	
+	\item[Remove parameter from animation] Right-click a parameter name row header and select \emph{Remove 'parameter\_name' from animation}.
+	
+	\item[Refresh all thumbnails] Right-click the reserved header row at the top and select \emph{Refresh all thumbnails} to regenerate preview images.
+\end{description}
+
+\subsubsection{Value chart}
+
+Above the keyframe table is the value chart (picture \ref{keyframe-chart}), which visualizes the values of animated parameters across all frames. This helps identify the shape of parameter transitions and detect potential issues such as sudden jumps.
+
+\simpleImageWithCaption75Width{img/manual/media/keyframe_value_chart.png}
+{Value chart}
+{keyframe-chart}{H}
+
+Use the \emph{+} and \emph{−} buttons to zoom in and out. The frame slider below the chart allows navigation through interpolated frames, and the preview updates accordingly.
+
+\subsubsection{Validation and cleanup}
+
+The \emph{Validation and cleaning up} panel provides tools to ensure animation quality:
+
+\begin{description}
+	\item[Validate before render] enables automatic collision checking before rendering. If a collision is detected, the animation will not start.
+	
+	\item[Validate] (button) manually checks all interpolated frames for collisions between the camera and the fractal. A collision occurs when the distance from the camera to the fractal surface is lower than the \emph{collision distance} threshold.
+	
+	\item[Collision distance] sets the minimum allowed distance between the camera and the fractal surface. Reduce this value to allow closer approaches.
+	
+	\item[Set the same camera target distance for all keyframes] (button) equalizes the distance between the camera and its target across all keyframes. This keeps the camera rotation smooth throughout the animation without modifying the camera position or movement path. The target distance value can be set in the adjacent field.
+\end{description}
+
+\subsubsection{Rendering the animation}
+
+\begin{enumerate}
+	\item Verify the animation using the value chart and frame slider.
+	
+	\item Optionally run \emph{Validate} to check for collisions.
+	
+	\item Set the output path and image format in the animation parameters panel.
+	
+	\item Click \emph{Render animation}. The program will render only frames that are missing from the output folder. Existing frames are skipped, allowing interrupted renders to be resumed.
+	
+	\item When rendering is complete, click \emph{Show Animation} to play back the rendered frames.
+\end{enumerate}
+
+\subsubsection{Exporting between animation modes}
+
+Keyframe animations can be converted to Flight animation and vice versa:
+
+\begin{description}
+	\item[Export to Flight] (button) exports all interpolated keyframe frames to the \emph{Flight animation (every frame)} tab. Each keyframe is expanded into individual per-frame flight data, allowing fine-grained editing of every frame in the Flight animation editor (or with an external CSV editor).
+	
+	\item[Export to Keyframes] (button, on the Flight animation tab) converts a recorded flight path into keyframes. The \emph{frames per keyframe} parameter on the Keyframe animation tab determines how many flight frames are sampled to create new keyframes.
+\end{description}
+
+\subsubsection{Animation storage format}
+
+Keyframe animation data is stored in the Mandelbulber settings file (\emph{.fract}) in CSV format within the \texttt{[keyframes]} section. This means animations can be edited with external tools such as spreadsheet editors or text editors.
+
+The first row of the \texttt{[keyframes]} section contains the parameter names. Each subsequent row represents one keyframe with its parameter values. The last row specifies the interpolation type for each parameter (e.g., \emph{morphAkima}, \emph{morphLinear}).
