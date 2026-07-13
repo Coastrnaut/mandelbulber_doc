@@ -36,28 +36,61 @@ To prevent this, the step can be multiplied by a number between 0 and 1 (\emph{r
 {Distance Estimation with DE factor 0.5}
 {distance_estimation_defactor_05}{h}
 
-Each formula has assigned a DE mode and function (``automatic''). In most cases
-the automatic \emph{mode} is \emph{Analytical DE} (fastest).
+\subsection{Analytical DE vs Delta DE}\label{analytical-vs-delta-de}
 
-The automatic \emph{function} is assigned based on whether the formula is
-transforming in a linear or logarithmic manner. These setting can be varied on
-the \emph{Render Engine} tab.
+Each formula is assigned a DE type: either \emph{Analytical DE} or \emph{Delta DE}.
 
-\emph{Analytical DE}\index{distance estimation!analytical} mode is faster than \emph{Delta DE}\index{distance estimation!delta DE} mode to calculate.
-However with some formulas only Delta DE mode will produce a good quality image.
-The DE modes can be used with either linear or logarithmic DE functions.
+\emph{Analytical DE}\index{distance estimation!analytical} computes the derivative of the fractal formula mathematically. It tracks the derivative of the iteration function alongside the point position, producing an accurate distance estimate. This mode is faster because the derivative is computed directly during iteration.
 
-Example linear out: $ distance = \frac{r}{\lvert DE \rvert} $
+\emph{Delta DE}\index{distance estimation!delta DE} approximates the derivative numerically by comparing the fractal function evaluated at two nearby points. This method does not require a hand-crafted derivative formula, making it more robust for formulas with complex or discontinuous transformations. However, it is slower because each evaluation requires computing the fractal function twice.
 
-Example logarithmic: $ distance = \frac{0.5 r  \log(r)}{DE} $
+In most cases, Analytical DE produces good results and is the preferred mode for speed. However, with some formulas (particularly those with discontinuous folds or conditional transforms), only Delta DE will produce a correct image. If you observe artifacts or noise that cannot be fixed by adjusting the step multiplier, try switching to Delta DE.
 
-The quality produced by the DE mode and function combinations is formula
-specific. The setting of formula parameters can also greatly affect the quality
-produced by the DE. In some cases the choice of fractal image is determined by
-what location and parameters can produce good DE quality.
+\subsection{DE Functions}\label{de-functions}
 
-%Statistics Tab with histogram data\index{statistics!wrong distance estimations}:
-\nopagebreak
+When using DE (either Analytical or Delta), the final distance is calculated by combining the radius \emph{r} (the distance of the final iteration point from the origin) with the computed derivative \emph{DE}. The formula used depends on the DE function type, which is determined by the nature of the fractal's transformations:
+
+\begin{description}
+	\item[Linear DE] Used for formulas with linear transformations (e.g., Mandelbulb, Mandelbox). The distance is calculated as:
+	\[ distance = \frac{r}{\lvert DE \rvert} \]
+	where \emph{r} is the radius (distance from the origin to the final iteration point) and \emph{DE} is the computed derivative.
+	
+	\item[Logarithmic DE] Used for formulas with logarithmic transformations. The distance is calculated as:
+	\[ distance = \frac{0.5 \cdot r \cdot \log(r)}{DE} \]
+	This function is applied when \emph{r} > 1.0. For \emph{r} $\le$ 1.0, the distance is set to 0.0.
+	
+	\item[IFS DE] Used for IFS (Iterated Function System) formulas such as Menger Sponge and Sierpinski. The distance is calculated as:
+	\[ distance = \frac{r - 2.0}{\lvert DE \rvert} \]
+	The constant 2.0 accounts for the specific scaling properties of IFS fractals.
+	
+	\item[Pseudo-Kleinian DE] Used for Pseudo-Kleinian fractals. The distance is calculated as:
+	\[ distance = \frac{\max(r_{xy} - DE_{pseudoKleinian}, \lvert r_{xy} \cdot z.z \rvert / r)}{\lvert DE \rvert} \]
+	where $r_{xy} = \sqrt{z.x^2 + z.y^2}$.
+	
+	\item[Jos-Kleinian DE] Used for Jos Kleinian fractals. The distance is calculated using a modified formula that accounts for the sphere folding parameters.
+	
+	\item[Max Axis DE] An alternative DE function that uses the maximum absolute component of the iteration point:
+	\[ distance = \frac{\max(\lvert z.x \rvert, \lvert z.y \rvert, \lvert z.z \rvert)}{\lvert DE \rvert} \]
+	
+	\item[Custom DE] Some formulas provide a custom distance calculation via the \emph{aux.dist} auxiliary variable.
+\end{description}
+
+The automatic DE function is assigned based on the formula type. These settings can be overridden manually on the \emph{Render Engine} tab if needed.
+
+\subsection{Linear DE offset}\label{linear-de-offset}
+
+For hybrid fractals that mix mandelbox-type and IFS-type formulas, the \emph{Linear DE offset} parameter adjusts the DE calculation. It is located in the Hybrids tab.
+
+The offset modifies the linear DE formula as follows:
+\[ out.distance = \frac{r - offset}{\lvert DE \rvert} \]
+
+The Linear DE offset is normally used in the range from 0.0 (mandelbox) to 2.0 (IFS). Adjusting this parameter can assist in fine-tuning the DE calculation when mixing these formula types in a hybrid fractal.
+
+\simpleImageWithCaptionHalfWidth{img/manual/media/linear_de_offset.png}
+{Linear DE offset parameter}
+{linear_de_offset}{h}
+
+\subsection{Bad DE statistic}\label{bad-de-statistic}
 
 \simpleImageWithCaptionHalfWidth{img/manual/media/dock_statistics.png}
 {Statistics Tab with histogram data}
@@ -70,20 +103,22 @@ pixels which potentially have big errors in distance estimation calculation
 As a general rule less than 0.01 is good, but it is case specific and 3.0
 sometimes is OK and 0.0001 sometimes is not.
 
-Figure \ref{bad_de_menger_sponge} is an example of Bad DE due to over-stepping. It starts to occur at the corner nearest to the camera, resulting in the black areas and distintegration of the fractal. If the ray-marching step multiplier is set even higher, the fractal will entirely disintegrate. This disintegration will generally be reflected in the Percentage of Wrong Distance Estimations statistic.
+Figure \ref{bad_de_menger_sponge} is an example of Bad DE due to over-stepping. It starts to occur at the corner nearest to the camera, resulting in the black areas and disintegration of the fractal. If the ray-marching step multiplier is set even higher, the fractal will entirely disintegrate. This disintegration will generally be reflected in the Percentage of Wrong Distance Estimations statistic.
 
 \simpleImageWithCaptionHalfWidth{img/manual/media/bad_de_menger_sponge.png}
 {Example of over-stepping}
 {bad_de_menger_sponge}{h}
 
-Figure \ref{linear_de_offset} shows the Linear DE offset parameter located in the Hybrids tab.
-For standard mandelbox types and IFS, there are two similar analytic distance estimation calculations used. When making a hybrid that mixes these types, adjusting the Linear DE offset parameter can assist in fine tuning the DE calculation.
+\subsection{Troubleshooting DE issues}\label{de-troubleshooting}
 
-Generic  linear : $ out.distance = \frac{r - offset}{\lvert DE \rvert} $
+If you observe artifacts or noise in your rendering, try the following:
 
-The Linear DE offset is normally used in the range from 0.0 (mandelbox) to 2.0 (IFS).
- 
-\simpleImageWithCaptionHalfWidth{img/manual/media/linear_de_offset.png}
-{Linear DE offset parameter}
-{linear_de_offset}{h}
+\begin{enumerate}
+	\item \textbf{Increase the ray-marching step multiplier} (decrease the value) to reduce the risk of overstepping the surface.
+	\item \textbf{Switch DE mode} from Analytical to Delta (or vice versa) if the current mode produces incorrect results for the given formula.
+	\item \textbf{Adjust the Linear DE offset} when using hybrid fractals that mix mandelbox and IFS formulas.
+	\item \textbf{Monitor the Bad DE statistic} in the Statistics dock to check if DE quality improves after changes.
+\end{enumerate}
 
+The quality produced by the DE mode and function combinations is formula-specific. The setting of formula parameters can also greatly affect the quality produced by the DE. In some cases the choice of fractal image is determined by
+what location and parameters can produce good DE quality.
