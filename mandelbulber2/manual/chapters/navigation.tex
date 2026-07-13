@@ -8,20 +8,21 @@ To set the current view there are two elements:
 	camera is \emph{always} looking at the target.)
 \end{description}
 
+The \emph{camera\_top} vector defines the upward direction of the camera. This vector is automatically updated when the camera is rotated. It is exposed in the keyframe animation editor but not in the main navigation controls.
+
 \subsection{Navigation by mouse pointer dragging}\label{navigation-by-mouse-pointer-dragging} \index{navigation!drag}
 
 In most cases the easiest way of moving and rotating the camera is dragging the fractal by holding the mouse button and moving the mouse pointer.
 
 \begin{description}
-	\item[Holding left mouse button] - rotates camera by moving target
-	\item[Holding right mouse button] - rotates camera around indicated point by moving camera and target
-	\item[Holding middle button] - rotates camera by changing only the roll angle
-	\item[Holding left and right buttons] - moves camera and target relative to the indicated point
-	\item[Holding control key and rotating mouse wheel] - moving camera forward/backward towards indicated point
+	\item[Left mouse button] rotates camera by moving target
+	\item[Right mouse button] rotates camera around indicated point by moving camera and target
+	\item[Middle button] rotates camera by changing only the roll angle
+	\item[Left + right buttons] moves camera and target relative to the indicated point
+	\item[Control key + mouse wheel] moves camera forward/backward towards indicated point
 \end{description}
 
-\subsection{Camera and Target movement
-	step}\label{camera-and-target-movement-step}
+\subsection{Camera and Target movement step}\label{camera-and-target-movement-step}
 
 The relationship between the camera point and the target point can be altered
 manually by changing the numbers in the edit fields, or by navigating with
@@ -60,21 +61,20 @@ pointer.
 This mode is recommended for flight animation with the camera flying at a fixed (or strictly
 controlled) speed.
 
-\subsection{Linear camera and target movement modes using the arrow
-	buttons}\label{linear-camera-and-target-movement-modes-using-the-arrow-buttons}
+\subsection{Linear camera and target movement modes using the arrow buttons}\label{linear-camera-and-target-movement-modes-using-the-arrow-buttons}
 
 A user can navigate by operating the arrow buttons on the Navigation dock, with the
 user defined steps.
 
-There are three modes for changing the relationship between camera and target:
+The \emph{Camera movement mode} parameter controls the relationship between camera and target during arrow key navigation. It has three modes:
 
-\begin{multicols}{3}
-\begin{itemize}
-	\item move camera and target
-	\item move only camera
-	\item move only target
-\end{itemize}
-\end{multicols}
+\begin{description}
+	\item[Fixed distance] move camera and target together (default)
+	\item[Move camera] move only camera
+	\item[Move target] move only target
+\end{description}
+
+These modes are available in the Navigation dock.
 
 \subsubsection{Move camera and target mode}\label{move-camera-and-target-mode}\index{navigation!camera}
 
@@ -106,6 +106,7 @@ Moves only the target while maintaining a fixed camera position (figure \ref{mov
 
 A user can move the camera by selecting a point on the image with the mouse pointer, and then using either left mouse button (move forward) or right button (move backward).
 
+This feature is controlled by the click mode setting. When click modes are enabled, clicking on the rendered image initiates camera movement toward the clicked point.
 
 \subsubsection{Move camera and target mode}\label{move-camera-and-target-mode-1}
 
@@ -128,8 +129,7 @@ stationary.
 The target is moved to the point selected by the mouse. The camera remains at
 the same point but rotates following the target.
 
-\subsection{Camera rotation modes using the arrow
-	buttons}\label{camera-rotation-modes-using-the-arrow-buttons}
+\subsection{Camera rotation modes using the arrow buttons}\label{camera-rotation-modes-using-the-arrow-buttons}
 
 \subsubsection{Rotate camera}\label{rotate-camera}\index{navigation!rotate}
 
@@ -138,7 +138,7 @@ the same point but rotates following the target.
 {rotate_camera}{H}
 
 The camera is rotated by the rotation step around its axis and the target is
-moved accordingly (figure \ref{rotate_camera}). This is the standard mode for rotation of the camera).
+moved accordingly (figure \ref{rotate_camera}). This is the standard mode for rotating the camera.
 
 \subsubsection{Rotate around target}\label{rotate-around-target}
 
@@ -152,27 +152,27 @@ the target.
 
 \subsection{Reset View}\label{reset-view}\index{navigation!reset view}
 
-Camera Position is reset, by being zoomed out from the fractal but still
-maintaining the camera angles.
+Reset View zooms the camera out from the fractal while maintaining the camera's orientation (angles). The target is reset to $(0, 0, 0)$ and the camera is positioned along the current forward vector at a distance calculated by scanning the fractal size in multiple random directions.
 
 If the rotations are changed to zero before using Reset View, the camera will
 then be zoomed out from the target, and rotated to look down the y axis.
 
-\subsection{Calculation of rotation angle
-	modes}\label{calculation-of-rotation-angle-modes}
+\subsection{Calculation of rotation angle modes}\label{calculation-of-rotation-angle-modes}
 
-\subsubsection{Fixed-roll angle}\label{fixed-roll-angle}
+The \emph{Rotation mode} parameter (labeled in the Navigation dock) controls how rotation angles are calculated. It has two options:
+
+\subsubsection{Fixed roll angle}\label{fixed-roll-angle}
 
 In this mode, the angle gamma (roll) is constant. Pan the camera left or right
 always takes place around the global vertical Z-axis (not the render window
 vertical axis).
 
-This mode can be likened to an aircrafts controls, where all turns are relative
+This mode can be likened to an aircraft's controls, where all turns are relative
 to the aircraft's axis, not the ground below. Rotate up / down raises / lowers
 the nose of the aircraft. Rotate left / right turns in the directions of the
 wings. Tilting the camera buttons
 \includegraphics[width=0.20000in,height=0.20000in]{img/manual/media/button_roll_left.png}\includegraphics[width=0.20000in,height=0.20000in]{img/manual/media/button_roll_right.png}
-tilts the aircraft
+tilts the aircraft.
 
 When the camera is pointing straight up or down, or when it is upside down in
 this mode, it is quite difficult to predict the result of the turn.
@@ -183,9 +183,26 @@ The camera is rotated around its own local axis (local vertical axis is the
 render window vertical axis.)
 
 This mode is a more intuitive way to rotate the camera, e.g., turn the camera
-left always give the visual effect of the camera rotating in that direction. The
+left always gives the visual effect of the camera rotating in that direction. The
 rotation angles are automatically converted so they are appropriate for the
 selected direction. This mode changes the gamma angle (roll).
+
+\subsection{Keyboard shortcuts}\label{keyboard-shortcuts}
+
+The following keyboard shortcuts are available for camera navigation (default bindings, configurable in settings):
+
+\begin{description}
+	\item[Q] move forward
+	\item[Z] move backward
+	\item[A] move left
+	\item[D] move right
+	\item[W] move up
+	\item[S] move down
+	\item[Left arrow] rotate left
+	\item[Right arrow] rotate right
+	\item[Up arrow] rotate up
+	\item[Down arrow] rotate down
+\end{description}
 
 \subsection{Camera rotation in animations}\label{camera-rotation-in-animations}\index{animation!rotation}
 
@@ -203,19 +220,18 @@ positions represent three keyframes.
 
 \simpleImageWithCaptionHalfWidth{img/manual/media/camera_target_tracking.png}
 {Keyframe Animation with differing distances camera to target}
-{camera_target_tracking}{h}
+{camera_target_tracking}{H}
 
 Between the first and second keyframes, the camera and target both move large
 distances. But between the second and third keyframes, the camera moves a much
 greater distance than the target. This can sometimes lead to unexpected camera
 rotations between keyframes.
 
-To compensate for this, on the Keyframe navigation tab use the button \emph{Set the
-same distance from the camera for all the frames}. This adjusts all keyframes by
+To compensate for this, on the Keyframe navigation tab use the button \emph{Set constant target distance}. This adjusts all keyframes by
 setting a constant distance between camera and target. It is important to note
 that the use of this function does not change the visual effect for the
 keyframes, and will help correct interpolation. See figure \ref{camera_target_tracking_2}.
 
 \simpleImageWithCaptionHalfWidth{img/manual/media/camera_target_tracking_2.png}
 {Keyframe Animation with equal distances camera to target}
-{camera_target_tracking_2}{h}
+{camera_target_tracking_2}{H}
