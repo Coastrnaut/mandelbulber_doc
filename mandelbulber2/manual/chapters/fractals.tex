@@ -17,16 +17,15 @@ iterations:
 
 \begin{itemize}
 		
+\item\emph{z} is a complex number (\emph{a} + i\emph{b}), where \emph{i} is
+the imaginary number.
 		
-	\item\emph{z} is a complex number (\emph{a} + i\emph{b}), where \emph{i} is
-	the imaginary number.
+\[ i = \sqrt{-1} \]
 		
-	\[ i = \sqrt{-1} \]
+The number is made of two parts: \emph{a} the real part and i\emph{b} the
+imaginary part.
 		
-	The number is made of two parts: \emph{a} the real part and i\emph{b} the
-	imaginary part.
-		
-	\item\emph{c} is the original position of the image point to be iterated.
+\item\emph{c} is the original position of the image point to be iterated.
 \end{itemize}
 
 In 2D, \emph{z} is a vector containing two complex number coordinates, x and y,
@@ -84,6 +83,43 @@ With traditional 2D fractals, every point is given a color. With 3D fractals,
 only the points that are found to belong to the set, are given a color.
 One simple method is to assign a different color depending on the distance of the point from the origin.
 
+\subsection{Julia mode and c-pixel}\label{julia-mode}
+
+The Mandelbrot set and Julia sets are closely related fractals that share the same iteration formula. The key difference lies in which variable is treated as a constant and which is varied across the image plane.
+
+\subsubsection{Mandelbrot set (c-pixel mode)}
+
+In the standard Mandelbrot set, the initial value \emph{z} is set to zero ($ z_0 = 0 $) and the constant \emph{c} varies for each pixel:
+
+\[z_{n + 1} = z_{n}^{2} + c_n\]
+
+where $ c_n $ is the complex coordinate of the pixel being rendered. Each pixel produces its own unique fractal sequence because \emph{c} is different for every point. The resulting image shows which initial values of \emph{c} remain bounded under iteration.
+
+\subsubsection{Julia set (Julia mode)}
+
+In Julia mode, the constant \emph{c} is fixed to a single value \emph{j} for the entire image, while the initial value \emph{z} varies with each pixel:
+
+\[z_{n + 1} = z_{n}^{2} + j\]
+
+where $ z_0 $ is the complex coordinate of the pixel being rendered, and $ j $ is the fixed Julia constant. Every pixel in the image follows the same iteration rule but starts from a different initial position.
+
+\subsubsection{Comparison}
+
+\begin{center}
+\begin{tabular}{l|c|c}
+           & \textbf{Mandelbrot (c-pixel)} & \textbf{Julia mode} \\
+\hline
+Fixed variable & $ z_0 = 0 $ & $ c = j $ (Julia constant) \\
+Varying variable & $ c $ (pixel position) & $ z_0 $ (pixel position) \\
+Iteration rule & $ z_{n+1} = z_n^2 + c_n $ & $ z_{n+1} = z_n^2 + j $ \\
+One image & Many fractals & One fractal \\
+\end{tabular}
+\end{center}
+
+The Julia constant is a 3D (or 4D) vector that replaces the c-pixel in the iteration formula. The constant multiplier controls the influence of the Julia constant. Different Julia constants produce dramatically different fractal structures while maintaining the same underlying formula characteristics.
+
+Small changes in the Julia constant can produce both subtle variations and entirely different fractal structures. This makes Julia mode a powerful tool for exploring the relationship between Mandelbrot-style fractals and their corresponding Julia sets.
+
 \subsection{3D fractals}\label{d-fractals}
 
 The Mandelbulb\index{Mandelbulb} three dimensional fractal is calculated from a
@@ -112,13 +148,28 @@ Iterated Function Systems\index{IFS}). An example would be the famous Menger Spo
 {Sierpinski}
 {sierpinski}{h}
 
-\subsection{Mandelbulber Program}\label{mandelbulber-program}
+\subsection{Fractal families in Mandelbulber}\label{fractal-families}
 
+Mandelbulber contains hundreds of fractal formulas organized into several families. Each family shares a common mathematical foundation but produces visually distinct results through variations in parameters and transformations.
+
+The main families include:
+
+\begin{itemize}
+	\item \textbf{Mandelbulb family} — 3D extensions of the Mandelbrot set using spherical coordinates. Produces organic, bulbous structures with intricate surface detail. The power parameter is the most influential setting.
+	\item \textbf{Mandelbox family} — based on box and sphere folding transformations. Creates geometric, architectural-looking fractals with sharp edges and self-similar structures.
+	\item \textbf{IFS (Iterated Function Systems)} — formulas like Menger Sponge and Sierpinski Tetrahedron that produce self-similar structures through repeated affine transformations.
+	\item \textbf{Kleinian and Pseudo-Kleinian} — based on discrete groups of Möbius transformations, producing intricate, lace-like structures with deep detail.
+	\item \textbf{Transforms} — building blocks that can be combined in hybrid mode, including box folds, spherical folds, rotations, scales, and many specialized transformations.
+	\item \textbf{Other families} — including Scator, Buffalo, MandelTorus, Mandelnest, Riemann Sphere, and many more.
+\end{itemize}
+
+To explore the full list of available formulas, open the formula selector in the Objects dock. Formulas are grouped by family in the dropdown menu.
+
+\subsection{Mandelbulber Program}\label{mandelbulber-program}
 
 Mandelbulber is a free open-source application designed to render 3D
 Mandelbrot fractals called Mandelbulbs and other 3D fractals like
 Mandelbox, Amazing-Surf, Kleinian, Boxbulb, Juliabulb, Menger Sponge, Sierpinski, Quaternion, Riemann-Sphere, and more. There are a many built-in effects and the option to produce animated fractal video.
-
 
 The following sections
 cover the program interface and other useful information about how to use the program.
