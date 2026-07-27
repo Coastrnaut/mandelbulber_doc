@@ -383,27 +383,40 @@ def process_image_macro(content):
         # Handle width=0.3\linewidth style
         width_match = re.search(r"width=([\d.]+)(\\?linewidth|in|pt|px)?", opts)
         if width_match:
-            val = width_match.group(1)
+            val = float(width_match.group(1))
             unit = width_match.group(2) or 'linewidth'
             if 'linewidth' in unit:
                 width = f"{val}linewidth"
             elif 'in' in unit:
-                width = f"{val}in"
+                # Convert inches to pixels (96 DPI)
+                width = str(int(val * 96))
             else:
-                width = val
+                width = str(int(val))
         height_match = re.search(r"height=([\d.]+)(in|pt|px)?", opts)
         if height_match:
-            val = height_match.group(1)
+            val = float(height_match.group(1))
             unit = height_match.group(2) or 'pt'
-            height = f"{val}{unit}"
+            if 'in' in unit:
+                # Convert inches to pixels (96 DPI)
+                height = str(int(val * 96))
+            elif 'pt' in unit:
+                # Convert points to pixels (1pt = 1.333px at 96 DPI)
+                height = str(int(val * 4 / 3))
+            else:
+                height = str(int(val))
         # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
         html_path = path.replace("\\", "/")
-        attrs = f' src="{html_path}" alt="{path}" '
-        if width:
-            attrs += f' width="{width}" '
-        if height:
-            attrs += f' height="{height}" '
-        return f'<img{attrs} />'
+        # Use style-based sizing (consistent with \simpleImageWithCaption)
+        style_parts = ['height:auto', 'display:block', 'margin:1em auto']
+        # Sound images use 50% width; other images use pixel width if available
+        if 'sound' in path.lower():
+            style_parts.insert(0, 'max-width:50%')
+        elif width:
+            style_parts.insert(0, 'max-width:{}px'.format(width))
+        else:
+            style_parts.insert(0, 'max-width:100%')
+        style = '; '.join(style_parts)
+        return '<img src="{}" alt="{}" style="{}" />'.format(html_path, path, style)
     content = re.sub(pattern, replace_image, content)
     return content
 
