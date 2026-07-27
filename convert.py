@@ -24,18 +24,40 @@ def parse_args():
     return parser.parse_args()
 
 
-def resolve_input(path, base_dir):
-    """Resolve \input{path} to actual file content."""
-    target = Path(base_dir) / path
+def resolve_input(path, base_dir, repo_root=None):
+    """Resolve \input{path} to actual file content, recursively processing \input{} directives."""
+    # Skip makro.tex and preamble.tex — they contain \def macro definitions and
+    # LaTeX package declarations, not content
+    basename = path.replace("\\", "/").split("/")[-1]
+    if basename in ("makro", "makro.tex", "preamble", "preamble.tex"):
+        return ""
+    # Always resolve \input{} paths relative to repo root (LaTeX source uses absolute paths from repo)
+    if repo_root is not None:
+        target = Path(repo_root) / path
+    else:
+        target = Path(base_dir) / path
     if not target.exists():
         # Try with .tex extension
-        target_tex = Path(base_dir) / (path + '.tex')
+        target_tex = Path(target).parent / (Path(target).stem + '.tex')
         if target_tex.exists():
             target = target_tex
         else:
             return f'<p class="error">File not found: {path}</p>'
     with open(target, "r", encoding="utf-8") as f:
-        return f.read()
+        content = f.read()
+    # Recursively process \input{} directives in the included file
+    input_pattern = r'\\input\{([^}]+)\}'
+    def replace_input(m):
+        sub_path = m.group(1)
+        return resolve_input(sub_path, base_dir, repo_root=repo_root)
+    content = re.sub(input_pattern, replace_input, content)
+    # Also process \include{} directives
+    include_pattern = r'\\include\{([^}]+)\}'
+    def replace_include(m):
+        sub_path = m.group(1) + '.tex'
+        return resolve_input(sub_path, base_dir, repo_root=repo_root)
+    content = re.sub(include_pattern, replace_include, content)
+    return content
 
 
 def _strip_latex_for_slug(text):
@@ -386,20 +408,20 @@ def process_image_macro(content):
     return content
 
 
-def process_content(content, base_dir):
+def process_content(content, base_dir, repo_root=None):
     """Main content processing function."""
     # Process \input{} commands first
     input_pattern = r'\\input\{([^}]+)\}'
     def replace_input(m):
         path = m.group(1)
-        return resolve_input(path, base_dir)
+        return resolve_input(path, base_dir, repo_root=repo_root)
     content = re.sub(input_pattern, replace_input, content)
 
     # Process \include{} commands
     include_pattern = r'\\include\{([^}]+)\}'
     def replace_include(m):
         path = m.group(1) + ".tex"
-        return resolve_input(path, base_dir)
+        return resolve_input(path, base_dir, repo_root=repo_root)
     content = re.sub(include_pattern, replace_include, content)
 
     # Process environments
@@ -594,7 +616,7 @@ def main():
             css_dst.parent.mkdir(exist_ok=True)
             shutil.copy2(css_src, css_dst)
 
-    main_file = source / "manual.tex"
+    main_file = Path(repo_root) / "handbook.tex"
     if not main_file.exists():
         print(f"Error: {main_file} not found")
         sys.exit(1)
