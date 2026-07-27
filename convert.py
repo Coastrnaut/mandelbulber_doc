@@ -49,13 +49,26 @@ def _strip_latex_for_slug(text):
     text = re.sub(r'\\text\{[^}]*\}', r'', text)
     # Remove any remaining \command{...} patterns
     text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', text)
-    # Remove any remaining bare \commands
-    text = re.sub(r'\\[a-zA-Z]+', '', text)
+    # Remove any remaining bare \commands, converting LaTeX escapes to their characters
+    def strip_bare_cmd(m):
+        name = m.group(1)
+        esc = {'_': '_', '#': '#', '$': '$', '%': '%', '!': '!', '&': '&', '\\': '\\', '/': '/'}
+        if name in esc:
+            return esc[name]
+        return ''
+    # First handle bare backslash + non-alphabetic (e.g. \_ \# \$)
+    text = re.sub(r'\\([^a-zA-Z])', lambda m: m.group(1), text)
+    # Then handle bare \commands (alphabetic)
+    text = re.sub(r'\\([a-zA-Z]+)', strip_bare_cmd, text)
     # Strip HTML tags that were already processed by the command loop
     text = re.sub(r'<[^>]*>', '', text)
     # Strip quotes and newlines to avoid breaking HTML attribute matching
     text = text.replace('"', '').replace("'", '').replace('{', '').replace('}', '')
     text = text.replace('\n', ' ').replace('\t', ' ')
+    # Strip invalid HTML ID characters: &, ?, %, #, space, etc.
+    text = re.sub(r'[&?#%,;:!\'"]', '', text)
+    # Remove leading/trailing dashes
+    text = text.strip('-')
     return text
 
 
@@ -66,6 +79,26 @@ def _make_heading_id(text, level):
     slug = re.sub(r'-+', '-', slug)
     _heading_counter[0] += 1
     return f"sec-{_heading_counter[0]}-{slug}"
+
+
+def _process_heading_text(raw):
+    """Process raw LaTeX text in a heading tag for display.
+    Converts \_, \&, \% etc. to their character equivalents.
+    Strips \emph{}, \textbf{}, \texttt{} etc. wrapping."""
+    text = raw
+    # Strip wrapping commands like \emph{...}, \textbf{...}, \textit{...}, \texttt{...}
+    for cmd in ['emph', 'textbf', 'textit', 'texttt', 'textsf', 'textup', 'textrm', 'bf', 'it', 'tt', 'rm', 'sf', 'large', 'Large', 'huge', 'scriptsize', 'footnotesize', 'tiny']:
+        text = re.sub(r'\\' + cmd + r'\{([^}]*)\}', r'\1', text)
+    # Process bare LaTeX escapes: \_ \& \% etc.
+    def unescape_cmd(m):
+        name = m.group(1)
+        esc = {'_': '_', '#': '#', '$': '$', '%': '%', '!': '!', '&': '&', '\\': '\\', '/': '/'}
+        if name in esc:
+            return esc[name]
+        return ''
+    text = re.sub(r'\\([^a-zA-Z])', lambda m: m.group(1), text)
+    text = re.sub(r'\\([a-zA-Z]+)', unescape_cmd, text)
+    return text
 
 
 def process_command(cmd_match):
@@ -122,27 +155,27 @@ def process_command(cmd_match):
         if not parts:
             return ""
         rid = _make_heading_id(parts[0], 1)
-        return f"<h1 id='{rid}'>{parts[0]}</h1>"
+        return f"<h1 id='{rid}'>{_process_heading_text(parts[0])}</h1>"
     elif cmd == "subsection":
         if not parts:
             return ""
         rid = _make_heading_id(parts[0], 2)
-        return f"<h2 id='{rid}'>{parts[0]}</h2>"
+        return f"<h2 id='{rid}'>{_process_heading_text(parts[0])}</h2>"
     elif cmd == "subsubsection":
         if not parts:
             return ""
         rid = _make_heading_id(parts[0], 3)
-        return f"<h3 id='{rid}'>{parts[0]}</h3>"
+        return f"<h3 id='{rid}'>{_process_heading_text(parts[0])}</h3>"
     elif cmd == "paragraph":
         if not parts:
             return ""
         rid = _make_heading_id(parts[0], 4)
-        return f"<h4 id='{rid}'>{parts[0]}</h4>"
+        return f"<h4 id='{rid}'>{_process_heading_text(parts[0])}</h4>"
     elif cmd == "subparagraph":
         if not parts:
             return ""
         rid = _make_heading_id(parts[0], 5)
-        return f"<h5 id='{rid}'>{parts[0]}</h5>"
+        return f"<h5 id='{rid}'>{_process_heading_text(parts[0])}</h5>"
     elif cmd == "textcolor":
         # \textcolor{color}{text} - parts[0] is color, parts[1] is text
         if len(parts) >= 2:
