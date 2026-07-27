@@ -12,6 +12,9 @@ import argparse
 from pathlib import Path
 from html import escape
 
+# Heading ID counter
+_heading_counter = [0]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert Mandelbulber LaTeX manual to HTML")
@@ -33,6 +36,34 @@ def resolve_input(path, base_dir):
             return f'<p class="error">File not found: {path}</p>'
     with open(target, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def _strip_latex_for_slug(text):
+    """Strip LaTeX commands from heading text for generating clean URL slugs."""
+    # Remove \emph{...}, \textbf{...}, \textit{...}, \texttt{...} etc.
+    # Use single backslash patterns to match LaTeX source text
+    text = re.sub(r'\\emph\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\textbf\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\textit\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\texttt\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\text\{[^}]*\}', r'', text)
+    # Remove any remaining \command{...} patterns
+    text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', text)
+    # Remove any remaining bare \commands
+    text = re.sub(r'\\[a-zA-Z]+', '', text)
+    # Strip quotes and newlines to avoid breaking HTML attribute matching
+    text = text.replace('"', '').replace("'", '')
+    text = text.replace('\n', ' ').replace('\t', ' ')
+    return text
+
+
+def _make_heading_id(text, level):
+    """Generate a clean heading ID from raw LaTeX text."""
+    clean = _strip_latex_for_slug(text)
+    slug = clean.strip().lower().replace(' ', '-')
+    slug = re.sub(r'-+', '-', slug)
+    _heading_counter[0] += 1
+    return f"sec-{_heading_counter[0]}-{slug}"
 
 
 def process_command(cmd_match):
@@ -86,15 +117,30 @@ def process_command(cmd_match):
     elif cmd == "hspace":
         return f'<span style="width: {parts[0]}; display: inline-block;"></span>' if parts else ""
     elif cmd == "section":
-        return f"<h1>{parts[0]}</h1>" if parts else ""
+        if not parts:
+            return ""
+        rid = _make_heading_id(parts[0], 1)
+        return f"<h1 id='{rid}'>{parts[0]}</h1>"
     elif cmd == "subsection":
-        return f"<h2>{parts[0]}</h2>" if parts else ""
+        if not parts:
+            return ""
+        rid = _make_heading_id(parts[0], 2)
+        return f"<h2 id='{rid}'>{parts[0]}</h2>"
     elif cmd == "subsubsection":
-        return f"<h3>{parts[0]}</h3>" if parts else ""
+        if not parts:
+            return ""
+        rid = _make_heading_id(parts[0], 3)
+        return f"<h3 id='{rid}'>{parts[0]}</h3>"
     elif cmd == "paragraph":
-        return f"<h4>{parts[0]}</h4>" if parts else ""
+        if not parts:
+            return ""
+        rid = _make_heading_id(parts[0], 4)
+        return f"<h4 id='{rid}'>{parts[0]}</h4>"
     elif cmd == "subparagraph":
-        return f"<h5>{parts[0]}</h5>" if parts else ""
+        if not parts:
+            return ""
+        rid = _make_heading_id(parts[0], 5)
+        return f"<h5 id='{rid}'>{parts[0]}</h5>"
     elif cmd == "textcolor":
         # \textcolor{color}{text} - parts[0] is color, parts[1] is text
         if len(parts) >= 2:
@@ -372,7 +418,7 @@ def process_content(content, base_dir):
     # Clean up any remaining unprocessed \href leftovers: {text} after </a>
     content = re.sub(r'</a>\s*\{([^}]*)\}', r'</a> \1', content)
     
-# Post-process: fix \emph{} artifacts that contain HTML tags from failed brace nesting
+    # Post-process: fix \emph{} artifacts that contain HTML tags from failed brace nesting
     emph_pattern = r'\\emph\{([^}]*(?:\{[^}]*\})?[^}]*)\}'
     def fix_emph(m):
         inner = m.group(1)
