@@ -392,7 +392,8 @@ def process_image_macro(content):
             val = float(width_match.group(1))
             unit = width_match.group(2) or 'linewidth'
             if 'linewidth' in unit:
-                width = f"{val}linewidth"
+                # \linewidth = 100% of line width
+                width = '100%'
             elif 'in' in unit:
                 # Convert inches to pixels (96 DPI)
                 width = str(int(val * 96))
@@ -543,8 +544,8 @@ def process_content(content, base_dir, repo_root=None):
     # Fix {[}...{]} literal bracket patterns
     content = re.sub(r'\{\[\}([^}]*)\{\]\}', r'[\1]', content)
     
-    # Convert remaining \item commands to <li> tags
-    content = re.sub(r'\\item\s*', '<li>', content)
+    # Convert remaining \item commands to <li></li> tags (both open and close)
+    content = re.sub(r'\\item\s*', '<li></li>', content)
     
     return content
 
@@ -553,45 +554,47 @@ def generate_toc(content):
     """Generate sidebar TOC from headings in processed content."""
     # Extract all headings with their IDs
     headings = []
-    # Match h1, h2, h3, h4, h5 tags with id attributes (single or double quotes)
-    heading_pattern = r'<h([1-6])[^>]*id=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</h\1>'
+    heading_pattern = r'<h([1-6])[^>]*id=[\x27\x22]([^\x27\x22]+)[\x27\x22][^>]*>(.*?)</h\1>'
     for match in re.finditer(heading_pattern, content):
         level = int(match.group(1))
         anchor = match.group(2)
-        text = re.sub(r'<[^>]+>', '', match.group(3)).strip()  # Strip any remaining HTML tags
+        text = re.sub(r'<[^>]+>', '', match.group(3)).strip()
         if text and anchor:
             headings.append((level, anchor, text))
-    
+
     if not headings:
-        return '<div class="sidebar"><h3>Table of Contents</h3><p>No sections found.</p></div>'
-    
-    # Build TOC HTML
-    toc_html = '<div class="sidebar">\n<h3>Table of Contents</h3>\n<ul>\n'
-    last_level = 0
-    
+        return '<div class="sidebar">\n<h3>Table of Contents</h3><p>No sections found.</p></div>'
+
+    # Build a tree from the headings
+    root = {'children': []}
+    stack = [(0, root)]  # (level, node)
+
     for level, anchor, text in headings:
-        # Close open tags if we go back up
-        while level < last_level:
-            toc_html += '</ul></li>\n'
-            last_level -= 1
-        # Open new nested lists if we go deeper
-        if level > last_level:
-            if last_level > 0:
-                toc_html += '</li>\n<li>\n<ul>\n'
-            else:
-                toc_html += '<li>\n<ul>\n'
-            last_level = level
+        node = {'level': level, 'anchor': anchor, 'text': text, 'children': []}
+        # Find the parent: pop stack until we find a node with level < current
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        if stack:
+            stack[-1][1]['children'].append(node)
         else:
-            toc_html += '</li>\n<li>\n'
-        
-        toc_html += f'<li><a href="#{anchor}">{escape(text)}</a></li>\n'
-    
-    # Close remaining open tags
-    for i in range(last_level, 0, -1):
-        toc_html += '</ul></li>\n'
-    
-    toc_html += '</ul>\n</div>'
+            root['children'].append(node)
+        stack.append((level, node))
+
+    # Render the tree as HTML
+    def render_tree(node):
+        result = ''
+        for child in node['children']:
+            result += '<li><a href="#' + child['anchor'] + '">' + escape(child['text']) + '</a>'
+            if child['children']:
+                result += '<ul>' + render_tree(child) + '</ul>'
+            result += '</li>'
+        return result
+
+    toc_html = '<div class="sidebar">\n<h3>Table of Contents</h3>\n<ul class="toc">\n'
+    toc_html += render_tree(root)
+    toc_html += '\n</ul>\n</div>'
     return toc_html
+
 
 
 def generate_html(title, content, toc):
