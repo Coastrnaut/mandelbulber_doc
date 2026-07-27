@@ -51,8 +51,10 @@ def _strip_latex_for_slug(text):
     text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', text)
     # Remove any remaining bare \commands
     text = re.sub(r'\\[a-zA-Z]+', '', text)
+    # Strip HTML tags that were already processed by the command loop
+    text = re.sub(r'<[^>]*>', '', text)
     # Strip quotes and newlines to avoid breaking HTML attribute matching
-    text = text.replace('"', '').replace("'", '')
+    text = text.replace('"', '').replace("'", '').replace('{', '').replace('}', '')
     text = text.replace('\n', ' ').replace('\t', ' ')
     return text
 
