@@ -547,6 +547,32 @@ def process_content(content, base_dir, repo_root=None):
     # Convert remaining \item commands to <li></li> tags (both open and close)
     content = re.sub(r'\\item\s*', '<li></li>', content)
     
+    # Strip bare LaTeX commands that have no HTML equivalent
+    for bare_cmd in ['nopagebreak', 'pagebreak', 'clearpage', 'bigskip', 'medskip', 'smallskip']:
+        content = re.sub(r'\\' + bare_cmd + r'\s*', '', content)
+    
+    
+    # Fix \& LaTeX escapes: \& in source → &amp; in HTML
+    # In the HTML output, \& appears as \\& (escaped backslash + &)
+    content = re.sub(r'\\\\&', '&amp;', content)
+    
+    
+    # Escape remaining bare & characters to &amp; (not inside HTML tags)
+    # Only escape & that are not already part of an HTML entity
+    def escape_ampersands(m):
+        text = m.group(0)
+        # Don't escape if already an entity
+        if text.startswith('&'):
+            return text
+        # Escape & to &amp;
+        return text.replace('&', '&amp;')
+    # Only process text outside HTML tags
+    parts = content.split('>')
+    for j in range(len(parts)):
+        if j < len(parts) - 1:
+            parts[j] = parts[j].replace('&', '&amp;')
+    content = '>'.join(parts)
+    
     return content
 
 
