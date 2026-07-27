@@ -456,6 +456,98 @@ def process_content(content, base_dir, repo_root=None):
         return resolve_input(path, base_dir, repo_root=repo_root)
     content = re.sub(include_pattern, replace_include, content)
 
+    # Extract \newcommand definitions to a dict, then replace bare \mX refs
+    metadata = {}
+    
+    def extract_command_value(content, start_pos, cmd_name):
+        """Find the value after \\newcommand{\\cmd_name}{ by counting braces.
+        
+        start_pos is already past the opening { of the value, so depth starts at 1.
+        """
+        depth = 1
+        i = start_pos
+        while i < len(content):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    value = content[start_pos:i]
+                    value = value.strip()
+                    if value.startswith('{') and value.endswith('}'):
+                        value = value[1:-1]
+                    return value
+            i += 1
+        return None
+    
+    # Extract \newcommand{\mX}{value} for metadata commands (m*)
+    pos = 0
+    while pos < len(content):
+        m = re.search(r'\\newcommand\{\\(m[a-zA-Z]+)\}\{', content[pos:])
+        if not m:
+            break
+        cmd_name = m.group(1)
+        value_start = pos + m.end()
+        value = extract_command_value(content, value_start, cmd_name)
+        if value is not None:
+            metadata[cmd_name] = value
+            # Remove this definition from content
+            # Find the end of the full \newcommand{\cmd_name}{value}
+            end_pos = value_start
+            depth = 0
+            for j in range(value_start, len(content)):
+                if content[j] == '{':
+                    depth += 1
+                elif content[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end_pos = j + 1
+                        break
+            content = content[:pos] + content[end_pos:]
+        pos += m.end()
+    
+    # Also extract \renewcommand for things like \baselinestretch
+    pos = 0
+    while pos < len(content):
+        m = re.search(r'\\renewcommand\{\\([a-zA-Z]+)\}\{', content[pos:])
+        if not m:
+            break
+        cmd_name = m.group(1)
+        value_start = pos + m.end()
+        value = extract_command_value(content, value_start, cmd_name)
+        if value is not None:
+            metadata[cmd_name] = value
+            end_pos = value_start
+            depth = 0
+            for j in range(value_start, len(content)):
+                if content[j] == '{':
+                    depth += 1
+                elif content[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end_pos = j + 1
+                        break
+            content = content[:pos] + content[end_pos:]
+        pos += m.end()
+    
+    # After extracting \renewcommand values, strip any leftover \baselinestretch
+    # (it's a formatting command, not content)
+    content = re.sub(r'\\baselinestretch(\\)?\s*', '', content)
+    
+    # Replace bare \\mX commands with extracted values
+    for key, value in metadata.items():
+        # Escape backslashes in value for use in re.sub replacement string
+        escaped_value = value.replace('\\', '\\\\')
+        # Also unescape & in value to prevent double-escaping
+        escaped_value = escaped_value.replace('&amp;', '&').replace('&', '&amp;')
+        # Replace \\mX{...} first (with arguments), then bare \\mX
+        # Use brace-aware matching for \\mX{...}
+        pattern_x = r'\\' + re.escape(key) + r'\{'
+        def replace_mx_braced(m):
+            return escaped_value
+        content = re.sub(pattern_x, replace_mx_braced, content)
+        content = re.sub(r'\\' + re.escape(key) + r'\s*', escaped_value, content)
+
     # Process environments
     env_pattern = r'\\begin\{([^}]+)\}(.*?)\\end\{\1\}'
     def replace_env(m):
@@ -467,6 +559,34 @@ def process_content(content, base_dir, repo_root=None):
             return f'<figure class="figure">{body}</figure>'
         elif env_name == "table":
             return f'<table class="table">{body}</table>'
+        elif env_name == "tabular":
+            # Convert tabular content: & -> cell delimiter, \\ -> row delimiter
+            # Only process if content actually has & cell delimiters
+            if '&' not in body:
+                return body
+            lines = re.split(r'\\\\', body)
+            rows = []
+            for line in lines:
+                line = line.strip()
+                # Skip column spec lines (first line usually has {l|c|c} etc.)
+                if re.match(r'^\s*\{[^}]*\}\s*$', line):
+                    continue
+                # Also match unbraced column specs like l|c|c or r|p{11cm}
+                if re.match(r'^\s*[lrcLRCpP\|\.]+\s*$', line):
+                    continue
+                if re.match(r'^\s*(\{[^}]*\}|[lrcLRCpP\|\.]+(?:\s+[lrcLRCpP\|\.]+)*)\s*$', line):
+                    continue
+                    continue
+                cells = line.split('&')
+                row_cells = []
+                for cell in cells:
+                    cell = cell.strip()
+                    # Strip leading/trailing { and } from cell content
+                    while cell.startswith('{') and cell.endswith('}'):
+                        cell = cell[1:-1]
+                    row_cells.append(f'<td>{cell}</td>')
+                rows.append(f'<tr>{"".join(row_cells)}</tr>')
+            return f'<table class="table"><tbody>{"".join(rows)}</tbody></table>'
         elif env_name == "itemize":
             items = []
             for line in body.split("\n"):
@@ -491,6 +611,27 @@ def process_content(content, base_dir, repo_root=None):
             return f'<div class="{env_name}">{body}</div>'
     content = re.sub(env_pattern, replace_env, content, flags=re.DOTALL)
 
+    # Process \lstinputlisting[caption={...}]{code/path} — code file references
+    def replace_lstinputlisting(m):
+        opts = m.group(1) or ""
+        path = m.group(2)
+        # Extract caption if present: caption={Formula > Mandelbulb constructor}
+        caption_match = re.search(r'caption=\{([^}]*)\}', opts)
+        caption = caption_match.group(1) if caption_match else path
+        # Try to read the source file; fall back to placeholder
+        file_path = Path(repo_root) / path if repo_root else None
+        code_content = ""
+        if file_path and file_path.exists():
+            try:
+                code_content = file_path.read_text(encoding="utf-8")
+            except Exception:
+                code_content = f"/* Source file '{path}' not available */"
+        else:
+            code_content = f"/* Source file '{path}' not available in repository */"
+        escaped = escape(code_content)
+        return f'<pre class="code-block"><code class="language-cpp">{escaped}</code></pre><p class="code-caption">{caption}</p>'
+    content = re.sub(r'\\lstinputlisting\[([^\]]*)\]\{([^}]+)\}', replace_lstinputlisting, content)
+
     # Process images BEFORE other commands (to avoid double-processing)
     content = process_image_macro(content, repo_root=repo_root)
 
@@ -507,6 +648,29 @@ def process_content(content, base_dir, repo_root=None):
         return f"<sup>&radic;({expr})</sup>"
     content = re.sub(r'\\sqrt\{([^}]*)\}', replace_sqrt, content)
 
+    # Strip multi-line makro.tex image macro calls (images don't exist in repo)
+    # threeImagesWithTwoCaptionsFullWidth — variable args on separate lines
+    # twoImagesWithTwoCaptionsFullWidth — variable args, optional newline before first arg
+    # simpleImageWithCaption + suffix — first arg on same line, H/h marker at end
+    # All must run BEFORE the general cmd_pattern loop
+    
+    # threeImages: macro on own line, 9 args total (3x {img},{caption},{ref_id})
+    # First arg may be on same line or next line (with/without tab)
+    content = re.sub(
+        r'\\threeImagesWithTwoCaptionsFullWidth\s*\{[^}]*\}(?:\s*\{[^}]*\}){6,}\s*\{[^}]*\}\s*\{[^}]*\}',
+        '', content, flags=re.DOTALL
+    )
+    # twoImages: variable args (3-11+), first arg may be on same line, {H}/{h} may be on same line as last arg
+    content = re.sub(
+        r'\\twoImagesWithTwoCaptionsFullWidth\s*(?:\s*\{[^}]*\})+',
+        '', content, flags=re.DOTALL
+    )
+    # simpleImageWithCaption + suffix — variable args (1+), may be single-line or multi-line
+    content = re.sub(
+        r'\\simpleImageWithCaption(75Width|FullWidth|HalfWidth|SmallWidth|ThirdWidth)\s*(?:\s*\{[^}]*\})+',
+        '', content, flags=re.DOTALL
+    )
+    
     # Process commands iteratively until stable (handles nested \textbf{\emph{text}})
     # Use brace-aware regex that handles one level of nesting
     cmd_pattern = r'\\([a-zA-Z]+)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
@@ -519,8 +683,8 @@ def process_content(content, base_dir, repo_root=None):
     if iteration >= 20:
         print("Warning: command processing hit 20 iterations, some nesting may remain")
 
-    # Clean up any remaining unprocessed \href leftovers: {text} after </a>
-    content = re.sub(r'</a>\s*\{([^}]*)\}', r'</a> \1', content)
+    # Clean up unprocessed \href second args: {text} left after </a> when source has \href{URL} {text} with space
+    content = re.sub(r'</a>\s*\{[^}]*\}', r'</a>', content)
     
     # Post-process: fix \emph{} artifacts that contain HTML tags from failed brace nesting
     emph_pattern = r'\\emph\{([^}]*(?:\{[^}]*\})?[^}]*)\}'
@@ -555,35 +719,102 @@ def process_content(content, base_dir, repo_root=None):
     content = re.sub(r'\{twoImagesWithTwoCaptionsFullWidth\{([^}]*)\}\}', lambda m: m.group(1), content)
     # Fix {[}...{]} literal bracket patterns
     content = re.sub(r'\{\[\}([^}]*)\{\]\}', r'[\1]', content)
+    # Strip custom image markers {id}{H} and {id}{h} from makro.tex (images don't exist in repo)
+    # Pattern: {id}{H} or {id}{h} where id is a non-space identifier
+    content = re.sub(r'\{([^\s{}]+)\}\{[Hh]\}', r'', content)
+    # Strip standalone {H} and {h} closing markers on their own lines
+    content = re.sub(r'^\s*\{[Hh]\}\s*$', '', content, flags=re.MULTILINE)
+    # Strip {img/...} remnants from unexpanded makro.tex macros (images don't exist in repo)
+    content = re.sub(r'\{img/[^}]+\}', '', content)
+    # Strip bare {caption text} patterns left by makro.tex macro expansion
+    content = re.sub(r'\{([^{}]+)\}\s*$', lambda m: m.group(1), content, flags=re.MULTILINE)
+    # Strip {text} patterns anywhere in line (not just at end)
+    content = re.sub(r'\{([^{}]+)\}', lambda m: m.group(1), content)
     
     # Convert remaining \item commands to <li></li> tags (both open and close)
     content = re.sub(r'\\item\s*', '<li></li>', content)
     
     # Strip bare LaTeX commands that have no HTML equivalent
-    for bare_cmd in ['nopagebreak', 'pagebreak', 'clearpage', 'bigskip', 'medskip', 'smallskip']:
+    for bare_cmd in ['nopagebreak', 'pagebreak', 'clearpage', 'bigskip', 'medskip', 'smallskip',
+                     'normalsize', 'scriptsize', 'break', 'vfill', 'newpage', 'grid',
+                     'linewidth', 'nolinebreak', 'large',
+                     'baselinestretch']:
         content = re.sub(r'\\' + bare_cmd + r'\s*', '', content)
+
+    # Document structure commands - strip (TOC already generated)
+    for struct_cmd in ['tableofcontents', 'listoffigures', 'lstlistoflistings', 'printindex']:
+        content = re.sub(r'\\' + struct_cmd + r'\s*', '', content)
+
+    # Metadata macros - strip
+#     for meta_cmd in ['mTitle', 'mSubtitle', 'mAuthor', 'mDateDocument', 'mVersionDocument']:
+#         content = re.sub(r'\\' + meta_cmd + r'\s*', '', content)
+# 
+    # Huge - size command without args in output, strip
+    content = re.sub(r'\\Huge\s*', '', content)
+
+    # Program, Mandelbulber - custom macros, strip
+    for custom_cmd in ['Program', 'Mandelbulber']:
+        content = re.sub(r'\\' + custom_cmd + r'\s*', '', content)
+
+    # hline - table horizontal line -> <hr>
+    content = re.sub(r'\\hline', '<hr>', content)
+
+    # Strip \caption{...} macros (LaTeX caption definitions, not content)
+    content = re.sub(r'\\caption\{[^}]*\}', '', content)
+
+    # Strip tabular column specs like {l|c|c}, {r|p{11cm}}, {c}
+    content = re.sub(r'\{(?:[lrcLRCpP\d\|\.]+(?:\{[^}]*\})?[lrcLRCpP\d\|\.]*|[lrcLRCpP\d\|\.]+(?:\s+[lrcLRCpP\d\|\.]+)*)\}', '', content)
+
+
+    # Process LaTeX escapes: \# -> #, \$ -> $, etc.
+    content = content.replace('\\#', '#')
+    content = content.replace('\\\\$', '$')
+    content = content.replace('\\\\%', '%')
+    content = content.replace('\\\\&', '&')
+    content = content.replace('\\\\_', '_')
+
+    # Math symbols - map to HTML entities
+    content = content.replace('\\ast', chr(8727))
+    content = content.replace('\\cdot', chr(8901))
+    content = content.replace('\\leq', chr(8804))
+    content = content.replace('\\le', chr(8804))
+    content = content.replace('\\lvert', '|')
+    content = content.replace('\\rvert', '|')
+    content = content.replace('\\textbackslash', chr(8249))
+    content = content.replace('\\textgreater', '&gt;')
+    content = content.replace('\\times', chr(215))
+    content = content.replace('\\space', ' ')
+    content = content.replace('\\log', 'log')
+    content = content.replace('\\max', 'max')
+    content = content.replace('\\le ', 'le ')
+
+    # ldots -> ellipsis
+    content = content.replace('\\ldots', chr(8230))
+
+    # tt - typewriter, already handled in process_command but appears as bare in output
+    content = re.sub(r'\\tt', '', content)
     
     
-    # Fix \& LaTeX escapes: \& in source → &amp; in HTML
-    # In the HTML output, \& appears as \\& (escaped backslash + &)
-    content = re.sub(r'\\\\&', '&amp;', content)
-    
-    
-    # Escape remaining bare & characters to &amp; (not inside HTML tags)
-    # Only escape & that are not already part of an HTML entity
-    def escape_ampersands(m):
-        text = m.group(0)
-        # Don't escape if already an entity
-        if text.startswith('&'):
-            return text
-        # Escape & to &amp;
-        return text.replace('&', '&amp;')
-    # Only process text outside HTML tags
-    parts = content.split('>')
-    for j in range(len(parts)):
-        if j < len(parts) - 1:
-            parts[j] = parts[j].replace('&', '&amp;')
-    content = '>'.join(parts)
+    # Fix double-escaped entities: &amp;radic; -> &radic; etc.
+    content = content.replace('&amp;radic;', '&radic;')
+    content = content.replace('&amp;hellip;', '&hellip;')
+    content = content.replace('&amp;mdash;', '&mdash;')
+    content = content.replace('&amp;ndash;', '&ndash;')
+    content = content.replace('&amp;bull;', '&bull;')
+    content = content.replace('&amp;times;', '&times;')
+    content = content.replace('&amp;laquo;', '&laquo;')
+    content = content.replace('&amp;raquo;', '&raquo;')
+    content = content.replace('&amp;copy;', '&copy;')
+    content = content.replace('&amp;reg;', '&reg;')
+    content = content.replace('&amp;trade;', '&trade;')
+    content = content.replace('&amp;euro;', '&euro;')
+    content = content.replace('&amp;pound;', '&pound;')
+
+    # Convert \( ... \) -> $ ... $ for MathJax
+    content = re.sub(r'\\\((.*?)\\\)', lambda m: '$' + m.group(1) + '$', content, flags=re.DOTALL)
+    # Convert \[ ... \] -> $$ ... $$ for MathJax
+    content = re.sub(r'\\\[(.*?)\\\]', lambda m: '$$' + m.group(1).strip() + '$$', content, flags=re.DOTALL)
+
     
     return content
 
@@ -663,10 +894,14 @@ CONTENT_PLACEHOLDER
 
 def main():
     args = parse_args()
-    source = Path(args.source)
+    source = Path(args.source).resolve()
 
     # Resolve base_dir to repo root for correct \input{} resolution
-    repo_root = str(Path(args.source).parent.parent)
+    # If source is a .tex file, use its parent; if it's a directory under mandelbulber2/, go up two levels
+    if source.is_file():
+        repo_root = str(source.parent)
+    else:
+        repo_root = str(source.parent.parent)
 
     # Copy CSS to repo root (skip if already there)
     css_src = Path("css/style.css")
@@ -688,6 +923,13 @@ def main():
         line for line in content.split('\n')
         if not line.lstrip().startswith('%')
     )
+    # Strip \def macro definitions (they're already handled by process_image_macro)
+    # Match \def\name#1#2...{...} and remove the entire definition
+    def_cmd = '\\def'
+    def_pattern = r'\\\\def\\\\[a-zA-Z]+#\\d(\\+[^{]*\\{[^}]*\\})+'
+    content = re.sub(def_pattern, '', content)
+    # Also strip any remaining \\def lines with their content
+    content = re.sub(r'\\\\def\\[a-zA-Z]+', '', content)
 
     processed = process_content(content, repo_root, repo_root=repo_root)
 
