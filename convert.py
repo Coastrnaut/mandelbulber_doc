@@ -65,8 +65,8 @@ def _strip_latex_for_slug(text):
     # Strip quotes and newlines to avoid breaking HTML attribute matching
     text = text.replace('"', '').replace("'", '').replace('{', '').replace('}', '')
     text = text.replace('\n', ' ').replace('\t', ' ')
-    # Strip invalid HTML ID characters: &, ?, %, #, space, etc.
-    text = re.sub(r'[&?#%,;:!\'"]', '', text)
+    # Strip invalid HTML ID characters: &, ?, %, #, space, ., etc.
+    text = re.sub(r'[&?#%,;:!\'\.\-]', '', text)
     # Remove leading/trailing dashes
     text = text.strip('-')
     return text
@@ -497,6 +497,8 @@ def process_content(content, base_dir):
     content = re.sub(r'\{textgreater\{\}\}', '>', content)
     # Fix twoImagesWithTwoCaptionsFullWidth{...} patterns
     content = re.sub(r'\{twoImagesWithTwoCaptionsFullWidth\{([^}]*)\}\}', lambda m: m.group(1), content)
+    # Fix {[}...{]} literal bracket patterns
+    content = re.sub(r'\{\[\}([^}]*)\{\]\}', r'[\1]', content)
     
     return content
 
