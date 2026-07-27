@@ -500,6 +500,9 @@ def process_content(content, base_dir):
     # Fix {[}...{]} literal bracket patterns
     content = re.sub(r'\{\[\}([^}]*)\{\]\}', r'[\1]', content)
     
+    # Convert remaining \item commands to <li> tags
+    content = re.sub(r'\\item\s*', '<li>', content)
+    
     return content
 
 
