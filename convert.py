@@ -45,6 +45,12 @@ def resolve_input(path, base_dir, repo_root=None):
             return f'<p class="error">File not found: {path}</p>'
     with open(target, "r", encoding="utf-8") as f:
         content = f.read()
+    # Strip % comment lines from .tex files (lines that begin with %)
+    # Only strip lines where % is the first non-whitespace character
+    content = '\n'.join(
+        line for line in content.split('\n')
+        if not line.lstrip().startswith('%')
+    )
     # Recursively process \input{} directives in the included file
     input_pattern = r'\\input\{([^}]+)\}'
     def replace_input(m):
@@ -636,6 +642,11 @@ def main():
 
     with open(main_file, "r", encoding="utf-8") as f:
         content = f.read()
+    # Strip % comment lines from .tex files (lines that begin with %)
+    content = '\n'.join(
+        line for line in content.split('\n')
+        if not line.lstrip().startswith('%')
+    )
 
     processed = process_content(content, repo_root)
 
