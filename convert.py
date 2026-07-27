@@ -354,8 +354,8 @@ def process_command(cmd_match):
         return f"<span style='font-size:1.5em'>{parts[0]}</span>" if parts else ""
 
 
-def process_image_macro(content):
-    """Process \includegraphics[opts]{path} and custom \simpleImageWithCaption{Type}{path}."""
+def process_image_macro(content, repo_root=None):
+    """Process \\includegraphics[opts]{path} and custom \\simpleImageWithCaption{Type}{path}."""
     # Map custom macro suffixes to width percentages
     width_map = {
         'FullWidth': '',
@@ -413,13 +413,25 @@ def process_image_macro(content):
                 height = str(int(val))
         # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
         html_path = path.replace("\\", "/")
+        # Auto-detect file extension if path has no extension
+        if repo_root and '.' not in html_path.split('/')[-1]:
+            for ext in ['.png', '.jpg', '.jpeg', '.svg', '.gif', '.pdf']:
+                candidate = html_path + ext
+                full = Path(repo_root) / candidate
+                if full.exists():
+                    html_path = candidate
+                    break
         # Use style-based sizing (consistent with \simpleImageWithCaption)
         style_parts = ['height:auto', 'display:block', 'margin:1em auto']
         # Sound images use 50% width; other images use pixel width if available
         if 'sound' in path.lower():
             style_parts.insert(0, 'max-width:50%')
         elif width:
-            style_parts.insert(0, 'max-width:{}px'.format(width))
+            # Avoid double suffix (e.g., '100%px')
+            if isinstance(width, str) and '%' in width:
+                style_parts.insert(0, f'max-width:{width}')
+            else:
+                style_parts.insert(0, f'max-width:{width}px')
         else:
             style_parts.insert(0, 'max-width:100%')
         style = '; '.join(style_parts)
@@ -480,7 +492,7 @@ def process_content(content, base_dir, repo_root=None):
     content = re.sub(env_pattern, replace_env, content, flags=re.DOTALL)
 
     # Process images BEFORE other commands (to avoid double-processing)
-    content = process_image_macro(content)
+    content = process_image_macro(content, repo_root=repo_root)
 
     # Pre-process \frac{num}{den} and \sqrt{expr} before the main loop
     # These have two separate brace arguments that the general regex can't handle
@@ -677,7 +689,7 @@ def main():
         if not line.lstrip().startswith('%')
     )
 
-    processed = process_content(content, repo_root)
+    processed = process_content(content, repo_root, repo_root=repo_root)
 
     title = "Mandelbulber Manual"
     
