@@ -205,9 +205,9 @@ def process_command(cmd_match):
     elif cmd == "textrm":
         return parts[0] if parts else ""
     elif cmd == "frac":
-        # \frac{num}{den} — parts[0] has two comma-separated parts
+        # \frac{num}{den} — parts[0] is num, parts[1] is den (two separate brace args)
         if len(parts) >= 2:
-            return f"<sup>{parts[0].split(',')[0]}</sup>/<sub>{parts[0].split(',')[1]}</sub>"
+            return f"<sup>{parts[0]}</sup>/<sub>{parts[1]}</sub>"
         return parts[0] if parts else ""
     elif cmd == "sqrt":
         return f"<sup>&radic;({parts[0]})</sup>" if parts else ""
@@ -403,6 +403,19 @@ def process_content(content, base_dir):
     # Process images BEFORE other commands (to avoid double-processing)
     content = process_image_macro(content)
 
+    # Pre-process \frac{num}{den} and \sqrt{expr} before the main loop
+    # These have two separate brace arguments that the general regex can't handle
+    def replace_frac(m):
+        num = m.group(1)
+        den = m.group(2)
+        return f"<sup>{num}</sup>/<sub>{den}</sub>"
+    content = re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', replace_frac, content)
+
+    def replace_sqrt(m):
+        expr = m.group(1)
+        return f"<sup>&radic;({expr})</sup>"
+    content = re.sub(r'\\sqrt\{([^}]*)\}', replace_sqrt, content)
+
     # Process commands iteratively until stable (handles nested \textbf{\emph{text}})
     # Use brace-aware regex that handles one level of nesting
     cmd_pattern = r'\\([a-zA-Z]+)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
@@ -457,8 +470,8 @@ def generate_toc(content):
     """Generate sidebar TOC from headings in processed content."""
     # Extract all headings with their IDs
     headings = []
-    # Match h1, h2, h3, h4, h5 tags with id attributes
-    heading_pattern = r'<h([1-6])[^>]*id="([^"]+)"[^>]*>(.*?)</h\1>'
+    # Match h1, h2, h3, h4, h5 tags with id attributes (single or double quotes)
+    heading_pattern = r'<h([1-6])[^>]*id=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</h\1>'
     for match in re.finditer(heading_pattern, content):
         level = int(match.group(1))
         anchor = match.group(2)
