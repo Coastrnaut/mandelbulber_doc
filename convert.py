@@ -343,6 +343,7 @@ def process_image_macro(content):
         suffix = m.group(1)
         path = m.group(2)
         width = width_map.get(suffix, '')
+        # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
         html_path = path.replace("\\", "/")
         if width:
             return f'<img src="{html_path}" alt="{path}" style="max-width:{width}; height:auto; display:block; margin:1em auto;" />'
@@ -373,6 +374,7 @@ def process_image_macro(content):
             val = height_match.group(1)
             unit = height_match.group(2) or 'pt'
             height = f"{val}{unit}"
+        # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
         html_path = path.replace("\\", "/")
         attrs = f' src="{html_path}" alt="{path}" '
         if width:
@@ -565,7 +567,9 @@ def generate_html(title, content, toc):
 <body>
 <h1>TITLE_PLACEHOLDER</h1>
 TOC_PLACEHOLDER
+<div id="content">
 CONTENT_PLACEHOLDER
+</div>
 </body>
 </html>"""
     return (
@@ -578,30 +582,17 @@ CONTENT_PLACEHOLDER
 def main():
     args = parse_args()
     source = Path(args.source)
-    output = Path(args.output)
-
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "css").mkdir(exist_ok=True)
-    (output / "img").mkdir(parents=True, exist_ok=True)
-
-    css_src = Path("css/style.css")
-    if css_src.exists():
-        shutil.copy2(css_src, output / "css" / "style.css")
 
     # Resolve base_dir to repo root for correct \input{} resolution
     repo_root = str(Path(args.source).parent.parent)
 
-    # Copy all images from source media directory to output
-    source_media = Path(repo_root) / "mandelbulber2" / "manual" / "media"
-    if source_media.exists():
-        dest_media = output / "img" / "manual" / "media"
-        dest_media.mkdir(parents=True, exist_ok=True)
-        for img_file in source_media.rglob("*"):
-            if img_file.is_file():
-                dest_file = dest_media / img_file.relative_to(source_media)
-                dest_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(img_file, dest_file)
-        print(f"Copied {len(list(source_media.rglob('*')))} files from media directory")
+    # Copy CSS to repo root (skip if already there)
+    css_src = Path("css/style.css")
+    css_dst = Path(repo_root) / "css" / "style.css"
+    if css_src.exists():
+        if css_src.resolve() != css_dst.resolve():
+            css_dst.parent.mkdir(exist_ok=True)
+            shutil.copy2(css_src, css_dst)
 
     main_file = source / "manual.tex"
     if not main_file.exists():
@@ -611,8 +602,6 @@ def main():
     with open(main_file, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Resolve base_dir to repo root for correct \input{} resolution
-    repo_root = str(Path(args.source).parent.parent)
     processed = process_content(content, repo_root)
 
     title = "Mandelbulber Manual"
@@ -622,7 +611,7 @@ def main():
     
     html = generate_html(title, processed, toc)
 
-    output_file = output / "index.html"
+    output_file = Path(repo_root) / "index.html"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(html)
 
