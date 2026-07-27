@@ -1,0 +1,534 @@
+#!/usr/bin/env python3
+"""
+LaTeX to HTML converter for Mandelbulber manual.
+Converts .tex source files to a single-page HTML document with collapsible sidebar TOC.
+"""
+
+import os
+import sys
+import re
+import shutil
+import argparse
+from pathlib import Path
+from html import escape
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Convert Mandelbulber LaTeX manual to HTML")
+    parser.add_argument("source", help="Path to mandelbulber2/manual directory")
+    parser.add_argument("output", help="Output directory for HTML files")
+    parser.add_argument("--index", action="store_true", help="Generate single-page HTML with TOC")
+    return parser.parse_args()
+
+
+def resolve_input(path, base_dir):
+    """Resolve \input{path} to actual file content."""
+    target = Path(base_dir) / path
+    if not target.exists():
+        # Try with .tex extension
+        target_tex = Path(base_dir) / (path + '.tex')
+        if target_tex.exists():
+            target = target_tex
+        else:
+            return f'<p class="error">File not found: {path}</p>'
+    with open(target, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def process_command(cmd_match):
+    """Process a LaTeX command and return HTML."""
+    cmd = cmd_match.group(1)
+    args = cmd_match.group(2) or ""
+    args = args.strip("{}")
+    parts = [p.strip() for p in args.split(",") if p.strip()]
+
+    if cmd == "textbf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "textit":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "emph":
+        # Handle nested content (e.g., from \textbf{\emph{text}})
+        inner = parts[0] if parts else ""
+        # Strip any HTML tags that leaked in
+        inner = re.sub(r'<[^>]+>', '', inner)
+        return f"<em>{inner}</em>" if inner else ""
+    elif cmd == "verb":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "code":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "file":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "option":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "url":
+        return f'<a href="{parts[0]}">{parts[0]}</a>' if parts else ""
+    elif cmd == "email":
+        return f'<a href="mailto:{parts[0]}">{parts[0]}</a>' if parts else ""
+    elif cmd == "href":
+        # \href{url}{text} - parts[0] is url, parts[1] is text
+        if len(parts) >= 2:
+            return f'<a href="{parts[0]}">{parts[1]}</a>'
+        elif parts:
+            return f'<a href="{parts[0]}">{parts[0]}</a>'
+        return ""
+    elif cmd == "index":
+        return f'<span class="index-marker" data-index="{parts[0]}"></span>' if parts else ""
+    elif cmd == "ref":
+        return f'<a class="ref-link" href="#{parts[0]}">{parts[0]}</a>' if parts else ""
+    elif cmd == "pageref":
+        return f'<a class="ref-link" href="#{parts[0]}">page {parts[0]}</a>' if parts else ""
+    elif cmd == "label":
+        return f'<span id="{parts[0]}"></span>' if parts else ""
+    elif cmd == "newlabel":
+        return ""
+    elif cmd == "vspace":
+        return f'<div style="height: {parts[0]};"></div>' if parts else ""
+    elif cmd == "hspace":
+        return f'<span style="width: {parts[0]}; display: inline-block;"></span>' if parts else ""
+    elif cmd == "section":
+        return f"<h1>{parts[0]}</h1>" if parts else ""
+    elif cmd == "subsection":
+        return f"<h2>{parts[0]}</h2>" if parts else ""
+    elif cmd == "subsubsection":
+        return f"<h3>{parts[0]}</h3>" if parts else ""
+    elif cmd == "paragraph":
+        return f"<h4>{parts[0]}</h4>" if parts else ""
+    elif cmd == "subparagraph":
+        return f"<h5>{parts[0]}</h5>" if parts else ""
+    elif cmd == "textcolor":
+        # \textcolor{color}{text} - parts[0] is color, parts[1] is text
+        if len(parts) >= 2:
+            return f'<span style="color:{parts[0]}">{parts[1]}</span>'
+        elif parts:
+            return f'<span style="color:{parts[0]}">{parts[0]}</span>'
+        return ""
+    elif cmd == "color":
+        if parts:
+            return f'<span style="color:{parts[0]}">'
+        return ""
+    elif cmd == "texttt":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "tt":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "bf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "it":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "text":
+        # \text{...} in math mode - just return the content
+        return parts[0] if parts else ""
+    elif cmd == "mathrm":
+        # \mathrm{...} in math mode - just return the content
+        return parts[0] if parts else ""
+    elif cmd == "mathbf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "mathit":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "textsuperscript":
+        return f"<sup>{parts[0]}</sup>" if parts else ""
+    elif cmd == "textsubscript":
+        return f"<sub>{parts[0]}</sub>" if parts else ""
+    elif cmd == "smallcaps":
+        return f"<span style='font-variant:small-caps'>{parts[0]}</span>" if parts else ""
+    elif cmd == "underline":
+        return f"<u>{parts[0]}</u>" if parts else ""
+    elif cmd == "sout":
+        return f"<s>{parts[0]}</s>" if parts else ""
+    elif cmd == "textrm":
+        return parts[0] if parts else ""
+    elif cmd == "large":
+        return f"<span style='font-size:1.2em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "Large":
+        return f"<span style='font-size:1.5em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "huge":
+        return f"<span style='font-size:1.8em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "scriptsize":
+        return f"<span style='font-size:0.8em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "footnotesize":
+        return f"<span style='font-size:0.9em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "tiny":
+        return f"<span style='font-size:0.7em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "rm":
+        return parts[0] if parts else ""
+    elif cmd == "sf":
+        return f"<span style='font-family:sans-serif'>{parts[0]}</span>" if parts else ""
+    elif cmd == "textsf":
+        return f"<span style='font-family:sans-serif'>{parts[0]}</span>" if parts else ""
+    elif cmd == "textup":
+        return parts[0] if parts else ""
+    elif cmd == "textrm":
+        return parts[0] if parts else ""
+    elif cmd == "frac":
+        # \frac{num}{den} — parts[0] has two comma-separated parts
+        if len(parts) >= 2:
+            return f"<sup>{parts[0].split(',')[0]}</sup>/<sub>{parts[0].split(',')[1]}</sub>"
+        return parts[0] if parts else ""
+    elif cmd == "sqrt":
+        return f"<sup>&radic;({parts[0]})</sup>" if parts else ""
+    elif cmd == "begin":
+        return f"<span class='begin-{parts[0]}'>" if parts else ""
+    elif cmd == "end":
+        return f"</span>" if parts else ""
+    elif cmd == "textgreater":
+        return "&gt;"
+    elif cmd == "textless":
+        return "&lt;"
+    elif cmd == "textperiodcentered":
+        return "&middot;"
+    elif cmd == "textvisiblespace":
+        return "&#x2423;"
+    elif cmd == "textasciicircum":
+        return "&#x2038;"
+    elif cmd == "textbackslash":
+        return "&#x2039;"
+    elif cmd == "textasciitilde":
+        return "&#x007E;"
+    elif cmd == "textem":
+        return "&#x0153;"
+    elif cmd == "textonehalf":
+        return "1.5"
+    elif cmd == "textonequarter":
+        return "0.25"
+    elif cmd == "textonehalf":
+        return "1.5"
+    elif cmd == "textthreequarters":
+        return "0.75"
+    elif cmd == "textfractionsolidus":
+        return "/"
+    elif cmd == "texttrademark":
+        return "&#x2122;"
+    elif cmd == "textregistered":
+        return "&#x00AE;"
+    elif cmd == "textcopyright":
+        return "&#x00A9;"
+    elif cmd == "textless":
+        return "&lt;"
+    elif cmd == "textgreater":
+        return "&gt;"
+    elif cmd == "textbar":
+        return "&#x00A6;"
+    elif cmd == "textbraceleft":
+        return "{"
+    elif cmd == "textbraceright":
+        return "}"
+    elif cmd == "texttt":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "tt":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "bf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "it":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "text":
+        # \text{...} in math mode - just return the content
+        return parts[0] if parts else ""
+    elif cmd == "mathrm":
+        # \mathrm{...} in math mode - just return the content
+        return parts[0] if parts else ""
+    elif cmd == "mathbf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "mathit":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "textsuperscript":
+        return f"<sup>{parts[0]}</sup>" if parts else ""
+    elif cmd == "textsubscript":
+        return f"<sub>{parts[0]}</sub>" if parts else ""
+    elif cmd == "smallcaps":
+        return f"<span style='font-variant:small-caps'>{parts[0]}</span>" if parts else ""
+    elif cmd == "underline":
+        return f"<u>{parts[0]}</u>" if parts else ""
+    elif cmd == "sout":
+        return f"<s>{parts[0]}</s>" if parts else ""
+    elif cmd == "large":
+        return f"<span style='font-size:1.2em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "Large":
+        return f"<span style='font-size:1.5em'>{parts[0]}</span>" if parts else ""
+
+
+def process_image_macro(content):
+    """Process \includegraphics[opts]{path} and custom \simpleImageWithCaption{Type}{path}."""
+    # Map custom macro suffixes to width percentages
+    width_map = {
+        'FullWidth': '',
+        '75Width': '75%',
+        'HalfWidth': '50%',
+        'ThirdWidth': '33%',
+        'SmallWidth': '200px',
+    }
+
+    # Process custom \simpleImageWithCaption{Type}{path} macros
+    custom_pattern = r'\\simpleImageWithCaption(75Width|FullWidth|HalfWidth|SmallWidth|ThirdWidth)\{([^}]+)\}'
+    def replace_custom_image(m):
+        suffix = m.group(1)
+        path = m.group(2)
+        width = width_map.get(suffix, '')
+        html_path = path.replace("\\", "/")
+        if width:
+            return f'<img src="{html_path}" alt="{path}" style="max-width:{width}; height:auto; display:block; margin:1em auto;" />'
+        else:
+            return f'<img src="{html_path}" alt="{path}" style="max-width:100%; height:auto; display:block; margin:1em auto;" />'
+    content = re.sub(custom_pattern, replace_custom_image, content)
+
+    # Process standard \includegraphics[opts]{path}
+    pattern = r'\\includegraphics(\[[^\]]*\])?\{([^}]+)\}'
+    def replace_image(m):
+        opts = m.group(1) or ""
+        path = m.group(2)
+        width = ""
+        height = ""
+        # Handle width=0.3\linewidth style
+        width_match = re.search(r"width=([\d.]+)(\\?linewidth|in|pt|px)?", opts)
+        if width_match:
+            val = width_match.group(1)
+            unit = width_match.group(2) or 'linewidth'
+            if 'linewidth' in unit:
+                width = f"{val}linewidth"
+            elif 'in' in unit:
+                width = f"{val}in"
+            else:
+                width = val
+        height_match = re.search(r"height=([\d.]+)(in|pt|px)?", opts)
+        if height_match:
+            val = height_match.group(1)
+            unit = height_match.group(2) or 'pt'
+            height = f"{val}{unit}"
+        html_path = path.replace("\\", "/")
+        attrs = f' src="{html_path}" alt="{path}" '
+        if width:
+            attrs += f' width="{width}" '
+        if height:
+            attrs += f' height="{height}" '
+        return f'<img{attrs} />'
+    content = re.sub(pattern, replace_image, content)
+    return content
+
+
+def process_content(content, base_dir):
+    """Main content processing function."""
+    # Process \input{} commands first
+    input_pattern = r'\\input\{([^}]+)\}'
+    def replace_input(m):
+        path = m.group(1)
+        return resolve_input(path, base_dir)
+    content = re.sub(input_pattern, replace_input, content)
+
+    # Process \include{} commands
+    include_pattern = r'\\include\{([^}]+)\}'
+    def replace_include(m):
+        path = m.group(1) + ".tex"
+        return resolve_input(path, base_dir)
+    content = re.sub(include_pattern, replace_include, content)
+
+    # Process environments
+    env_pattern = r'\\begin\{([^}]+)\}(.*?)\\end\{\1\}'
+    def replace_env(m):
+        env_name = m.group(1)
+        body = m.group(2)
+        if env_name == "verbatim":
+            return f'<pre class="verbatim">{escape(body)}</pre>'
+        elif env_name == "figure":
+            return f'<figure class="figure">{body}</figure>'
+        elif env_name == "table":
+            return f'<table class="table">{body}</table>'
+        elif env_name == "itemize":
+            items = []
+            for line in body.split("\n"):
+                line = line.strip()
+                if line.startswith("\\item"):
+                    line = line[5:].strip()
+                    items.append(f"<li>{line}</li>")
+            return f"<ul>{chr(10).join(items)}</ul>"
+        elif env_name == "enumerate":
+            items = []
+            for i, line in enumerate(body.split("\n"), 1):
+                line = line.strip()
+                if line.startswith("\\item"):
+                    line = line[5:].strip()
+                    items.append(f"<li>{i}. {line}</li>")
+            return f"<ol>{chr(10).join(items)}</ol>"
+        elif env_name == "quote":
+            return f"<blockquote>{body}</blockquote>"
+        elif env_name == "quotation":
+            return f"<blockquote>{body}</blockquote>"
+        else:
+            return f'<div class="{env_name}">{body}</div>'
+    content = re.sub(env_pattern, replace_env, content, flags=re.DOTALL)
+
+    # Process images BEFORE other commands (to avoid double-processing)
+    content = process_image_macro(content)
+
+    # Process commands iteratively until stable (handles nested \textbf{\emph{text}})
+    # Use brace-aware regex that handles one level of nesting
+    cmd_pattern = r'\\([a-zA-Z]+)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    prev = None
+    iteration = 0
+    while prev != content and iteration < 20:
+        prev = content
+        content = re.sub(cmd_pattern, process_command, content)
+        iteration += 1
+    if iteration >= 20:
+        print("Warning: command processing hit 20 iterations, some nesting may remain")
+
+    # Clean up any remaining unprocessed \href leftovers: {text} after </a>
+    content = re.sub(r'</a>\s*\{([^}]*)\}', r'</a> \1', content)
+    
+# Post-process: fix \emph{} artifacts that contain HTML tags from failed brace nesting
+    emph_pattern = r'\\emph\{([^}]*(?:\{[^}]*\})?[^}]*)\}'
+    def fix_emph(m):
+        inner = m.group(1)
+        # Strip any HTML tags
+        inner = re.sub(r'<[^>]+>', '', inner)
+        # Unescape LaTeX escapes
+        inner = inner.replace('\\_', '_')
+        return f'<em>{inner}</em>'
+    content = re.sub(emph_pattern, fix_emph, content)
+    
+    # Post-process: fix remaining unprocessed nested brace patterns
+    # These are LITERAL curly braces in the HTML (not backslash-escaped)
+    def fix_braces(m):
+        text = m.group(0)
+        # Unescape LaTeX escapes
+        text = text.replace('\\_', '_').replace('\\#', '#').replace('\\$', '$')
+        # Remove outer braces
+        if text.startswith('{') and text.endswith('}'):
+            text = text[1:-1]
+        return text
+    # Fix {begin{...}}, {end{...}} patterns (literal braces in HTML)
+    content = re.sub(r'\{begin\{[^}]+\}\}', fix_braces, content)
+    content = re.sub(r'\{end\{[^}]+\}\}', fix_braces, content)
+    # Fix {texttt{...}}, {textbf{...}} etc.
+    for cmd in ['texttt', 'textbf', 'textit', 'text', 'bf', 'it', 'tt']:
+        content = re.sub(r'\{' + cmd + r'\{([^}]*)\}\}', fix_braces, content)
+    # Fix {textgreater{}} patterns
+    content = re.sub(r'\{textgreater\{\}\}', '>', content)
+    # Fix twoImagesWithTwoCaptionsFullWidth{...} patterns
+    content = re.sub(r'\{twoImagesWithTwoCaptionsFullWidth\{([^}]*)\}\}', lambda m: m.group(1), content)
+    
+    return content
+
+
+def generate_toc(content):
+    """Generate sidebar TOC from headings in processed content."""
+    # Extract all headings with their IDs
+    headings = []
+    # Match h1, h2, h3, h4, h5 tags with id attributes
+    heading_pattern = r'<h([1-6])[^>]*id="([^"]+)"[^>]*>(.*?)</h\1>'
+    for match in re.finditer(heading_pattern, content):
+        level = int(match.group(1))
+        anchor = match.group(2)
+        text = re.sub(r'<[^>]+>', '', match.group(3)).strip()  # Strip any remaining HTML tags
+        if text and anchor:
+            headings.append((level, anchor, text))
+    
+    if not headings:
+        return '<div class="sidebar"><h3>Table of Contents</h3><p>No sections found.</p></div>'
+    
+    # Build TOC HTML
+    toc_html = '<div class="sidebar">\n<h3>Table of Contents</h3>\n<ul>\n'
+    last_level = 0
+    
+    for level, anchor, text in headings:
+        # Close open tags if we go back up
+        while level < last_level:
+            toc_html += '</ul></li>\n'
+            last_level -= 1
+        # Open new nested lists if we go deeper
+        if level > last_level:
+            if last_level > 0:
+                toc_html += '</li>\n<li>\n<ul>\n'
+            else:
+                toc_html += '<li>\n<ul>\n'
+            last_level = level
+        else:
+            toc_html += '</li>\n<li>\n'
+        
+        toc_html += f'<li><a href="#{anchor}">{escape(text)}</a></li>\n'
+    
+    # Close remaining open tags
+    for i in range(last_level, 0, -1):
+        toc_html += '</ul></li>\n'
+    
+    toc_html += '</ul>\n</div>'
+    return toc_html
+
+
+def generate_html(title, content, toc):
+    """Generate complete HTML document."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TITLE_PLACEHOLDER</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+<h1>TITLE_PLACEHOLDER</h1>
+TOC_PLACEHOLDER
+CONTENT_PLACEHOLDER
+</body>
+</html>"""
+    return (
+        html.replace("TITLE_PLACEHOLDER", escape(title), 2)
+        .replace("TOC_PLACEHOLDER", toc)
+        .replace("CONTENT_PLACEHOLDER", content)
+    )
+
+
+def main():
+    args = parse_args()
+    source = Path(args.source)
+    output = Path(args.output)
+
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "css").mkdir(exist_ok=True)
+    (output / "img").mkdir(parents=True, exist_ok=True)
+
+    css_src = Path("css/style.css")
+    if css_src.exists():
+        shutil.copy2(css_src, output / "css" / "style.css")
+
+    # Resolve base_dir to repo root for correct \input{} resolution
+    repo_root = str(Path(args.source).parent.parent)
+
+    # Copy all images from source media directory to output
+    source_media = Path(repo_root) / "mandelbulber2" / "manual" / "media"
+    if source_media.exists():
+        dest_media = output / "img" / "manual" / "media"
+        dest_media.mkdir(parents=True, exist_ok=True)
+        for img_file in source_media.rglob("*"):
+            if img_file.is_file():
+                dest_file = dest_media / img_file.relative_to(source_media)
+                dest_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(img_file, dest_file)
+        print(f"Copied {len(list(source_media.rglob('*')))} files from media directory")
+
+    main_file = source / "manual.tex"
+    if not main_file.exists():
+        print(f"Error: {main_file} not found")
+        sys.exit(1)
+
+    with open(main_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Resolve base_dir to repo root for correct \input{} resolution
+    repo_root = str(Path(args.source).parent.parent)
+    processed = process_content(content, repo_root)
+
+    title = "Mandelbulber Manual"
+    
+    # Generate TOC from headings
+    toc = generate_toc(processed)
+    
+    html = generate_html(title, processed, toc)
+
+    output_file = output / "index.html"
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    print(f"Generated {output_file}")
+
+
+if __name__ == "__main__":
+    main()
