@@ -484,7 +484,7 @@ def process_content(content, base_dir, repo_root=None):
     # Extract \newcommand{\mX}{value} for metadata commands (m*)
     pos = 0
     while pos < len(content):
-        m = re.search(r'\\newcommand\{\\(m[a-zA-Z]+)\}\{', content[pos:])
+        m = re.search(r'\newcommand{\(m[a-zA-Z]+)}{', content[pos:])
         if not m:
             break
         cmd_name = m.group(1)
@@ -510,7 +510,7 @@ def process_content(content, base_dir, repo_root=None):
     # Also extract \renewcommand for things like \baselinestretch
     pos = 0
     while pos < len(content):
-        m = re.search(r'\\renewcommand\{\\([a-zA-Z]+)\}\{', content[pos:])
+        m = re.search(r'\\renewcommand{\([a-zA-Z]+)}{', content[pos:])
         if not m:
             break
         cmd_name = m.group(1)
