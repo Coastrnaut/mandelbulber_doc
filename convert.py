@@ -15,6 +15,11 @@ from html import escape
 # Heading ID counter
 _heading_counter = [0]
 
+# Section numbering counters
+_section_counter = [0]   # section number
+_subsection_counter = [0]  # subsection number
+_subsubsection_counter = [0]  # subsubsection number
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert Mandelbulber LaTeX manual to HTML")
@@ -187,18 +192,27 @@ def process_command(cmd_match):
     elif cmd == "section":
         if not parts:
             return ""
+        _section_counter[0] += 1
+        _subsection_counter[0] = 0
+        _subsubsection_counter[0] = 0
+        sec_num = f"{_section_counter[0]}"
         rid = _make_heading_id(parts[0], 1)
-        return f"<h1 id='{rid}'>{_process_heading_text(parts[0])}</h1>"
+        return f"<h1 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h1>"
     elif cmd == "subsection":
         if not parts:
             return ""
+        _subsection_counter[0] += 1
+        _subsubsection_counter[0] = 0
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}"
         rid = _make_heading_id(parts[0], 2)
-        return f"<h2 id='{rid}'>{_process_heading_text(parts[0])}</h2>"
+        return f"<h2 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h2>"
     elif cmd == "subsubsection":
         if not parts:
             return ""
+        _subsubsection_counter[0] += 1
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}"
         rid = _make_heading_id(parts[0], 3)
-        return f"<h3 id='{rid}'>{_process_heading_text(parts[0])}</h3>"
+        return f"<h3 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h3>"
     elif cmd == "paragraph":
         if not parts:
             return ""
@@ -222,6 +236,8 @@ def process_command(cmd_match):
         if parts:
             return f'<span style="color:{parts[0]}">'
         return ""
+    elif cmd == "textsc":
+        return f"<span style='font-variant:small-caps'>{parts[0]}</span>" if parts else ""
     elif cmd == "texttt":
         return f"<code>{parts[0]}</code>" if parts else ""
     elif cmd == "tt":
@@ -651,6 +667,11 @@ def process_content(content, base_dir, repo_root=None):
             return f"<blockquote>{body}</blockquote>"
         elif env_name == "quotation":
             return f"<blockquote>{body}</blockquote>"
+        elif env_name in ("bmatrix", "pmatrix", "array", "matrix"):
+            # Convert \\\\ row separators to <br> and & to cell separators
+            body = body.replace("\\", "<br>")
+            body = body.replace("&", " & ")
+            return f'<span class="math-matrix">{body}</span>'
         elif env_name == "minipage":
             # \begin{minipage}[b]{0.5\linewidth} — strip optional [arg] and {arg}
             return body
@@ -821,8 +842,11 @@ def process_content(content, base_dir, repo_root=None):
     # hline - table horizontal line -> <hr>
     content = re.sub(r'\\hline', '<hr>', content)
 
-    # Strip \caption{...} macros (LaTeX caption definitions, not content)
-    content = re.sub(r'\\caption\{[^}]*\}', '', content)
+    # Render \caption{...} as visible captions (not strip them)
+    def replace_caption(m):
+        caption_text = m.group(1)
+        return f'<figcaption class="caption">{caption_text}</figcaption>'
+    content = re.sub(r'\\caption\{([^}]*)\}', replace_caption, content)
 
     # Strip \\\\ (LaTeX line breaks) that leaked outside tabular
     content = re.sub(r'\\\\\\\\s*', '', content)
