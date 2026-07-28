@@ -178,6 +178,12 @@ def process_command(cmd_match):
         return f'<div style="height: {parts[0]};"></div>' if parts else ""
     elif cmd == "hspace":
         return f'<span style="width: {parts[0]}; display: inline-block;"></span>' if parts else ""
+    elif cmd == "specialrule":
+        # \specialrule{thickness}{above}{below} - horizontal rule
+        if len(parts) >= 1:
+            thickness = parts[0]
+            return f'<hr style="height:{thickness}; margin:0.5em 0;"/>'
+        return ""
     elif cmd == "section":
         if not parts:
             return ""
@@ -484,7 +490,7 @@ def process_content(content, base_dir, repo_root=None):
     # Extract \newcommand{\mX}{value} for metadata commands (m*)
     pos = 0
     while pos < len(content):
-        m = re.search(r'\newcommand{\(m[a-zA-Z]+)}{', content[pos:])
+        m = re.search(r'\\newcommand{\\(m[a-zA-Z]+)}{', content[pos:])
         if not m:
             break
         cmd_name = m.group(1)
@@ -504,13 +510,14 @@ def process_content(content, base_dir, repo_root=None):
                     if depth == 0:
                         end_pos = j + 1
                         break
-            content = content[:pos] + content[end_pos:]
-        pos += m.end()
+            match_start = pos + m.start()
+            content = content[:match_start] + content[end_pos:]
+        pos = pos + m.start() + 1
     
     # Also extract \renewcommand for things like \baselinestretch
     pos = 0
     while pos < len(content):
-        m = re.search(r'\\renewcommand{\([a-zA-Z]+)}{', content[pos:])
+        m = re.search(r'\\renewcommand{\\([a-zA-Z]+)}{', content[pos:])
         if not m:
             break
         cmd_name = m.group(1)
@@ -711,6 +718,13 @@ def process_content(content, base_dir, repo_root=None):
         '', content, flags=re.DOTALL
     )
     
+
+    # Strip \specialrule{thickness}{above}{below} - multi-arg command
+    content = re.sub(r'\\specialrule(?:\s*\{[^}]*\}){1,4}', '', content)
+
+    # Strip \break (page break) and \vfill (vertical filler)
+    content = re.sub(r'\\break\s*', '', content)
+    content = re.sub(r'\\vfill\s*', '', content)
     # Process commands iteratively until stable (handles nested \textbf{\emph{text}})
     # Use brace-aware regex that handles one level of nesting
     cmd_pattern = r'\\([a-zA-Z]+)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
@@ -739,6 +753,9 @@ def process_content(content, base_dir, repo_root=None):
     
     # Post-process: fix remaining unprocessed nested brace patterns
     # These are LITERAL curly braces in the HTML (not backslash-escaped)
+    # Strip tabular column specs like {l|c|c}, {r|p{11cm}}, {c}
+    # Strip tabular column specs - both with and without inner braces
+    content = re.sub(r'\{(?:[lrcLRCpP@\d\|\.]+(?:\{[^}]*\})?)*\}\s*', '', content)
     def fix_braces(m):
         text = m.group(0)
         # Unescape LaTeX escapes
@@ -766,6 +783,8 @@ def process_content(content, base_dir, repo_root=None):
     content = re.sub(r'^\s*\{[Hh]\}\s*$', '', content, flags=re.MULTILINE)
     # Strip {img/...} remnants from unexpanded makro.tex macros (images don't exist in repo)
     content = re.sub(r'\{img/[^}]+\}', '', content)
+    # Strip stray bare group delimiters ({ or } on their own line)
+    content = re.sub(r'\n\s*\{\s*\n', '\n', content)
     # Strip stray closing braces/tabs that leak before content
     content = re.sub(r'\n\s*}\s*\n', '\n', content)
     
@@ -805,8 +824,9 @@ def process_content(content, base_dir, repo_root=None):
     # Strip \caption{...} macros (LaTeX caption definitions, not content)
     content = re.sub(r'\\caption\{[^}]*\}', '', content)
 
-    # Strip tabular column specs like {l|c|c}, {r|p{11cm}}, {c}
-    content = re.sub(r'\{(?:[lrcLRCpP\d\|\.]+(?:\{[^}]*\})?[lrcLRCpP\d\|\.]*|[lrcLRCpP\d\|\.]+(?:\s+[lrcLRCpP\d\|\.]+)*)\}', '', content)
+    # Strip \\\\ (LaTeX line breaks) that leaked outside tabular
+    content = re.sub(r'\\\\\\\\s*', '', content)
+    
 
 
     # Process LaTeX escapes: \# -> #, \$ -> $, etc.
@@ -860,6 +880,9 @@ def process_content(content, base_dir, repo_root=None):
     # Also strip orphaned baselinestretch values at content start
     content = re.sub(r'^\s*\d+\.\d+\s*', '', content)
     
+
+    # Strip trailing \\ (LaTeX line breaks) that leaked outside tabular
+    content = re.sub(r'\\\\\s*(?=\n|<)', '', content)
     # Convert \( ... \) -> $ ... $ for MathJax
     content = re.sub(r'\\\((.*?)\\\)', lambda m: '$' + m.group(1) + '$', content, flags=re.DOTALL)
     # Convert \[ ... \] -> $$ ... $$ for MathJax
