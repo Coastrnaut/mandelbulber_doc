@@ -549,7 +549,7 @@ def process_content(content, base_dir, repo_root=None):
         content = re.sub(r'\\' + re.escape(key) + r'\s*', escaped_value, content)
 
     # Process environments
-    env_pattern = r'\\begin\{([^}]+)\}(.*?)\\end\{\1\}'
+    env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?\{(?:[^}]*\})*[^}]*\}(.*?)\\end\{\1\}'
     def replace_env(m):
         env_name = m.group(1)
         body = m.group(2)
@@ -564,7 +564,7 @@ def process_content(content, base_dir, repo_root=None):
             # Only process if content actually has & cell delimiters
             if '&' not in body:
                 return body
-            lines = re.split(r'\\\\', body)
+            lines = re.split(r'\\\\(?=\s*$|\s)', body)
             rows = []
             for line in lines:
                 line = line.strip()
@@ -572,11 +572,36 @@ def process_content(content, base_dir, repo_root=None):
                 if re.match(r'^\s*\{[^}]*\}\s*$', line):
                     continue
                 # Also match unbraced column specs like l|c|c or r|p{11cm}
-                if re.match(r'^\s*[lrcLRCpP\|\.]+\s*$', line):
-                    continue
-                if re.match(r'^\s*(\{[^}]*\}|[lrcLRCpP\|\.]+(?:\s+[lrcLRCpP\|\.]+)*)\s*$', line):
-                    continue
-                    continue
+                # Use brace counting for specs with nested braces (e.g. r|p{11cm})
+                stripped = line.strip()
+                if stripped:
+                    depth = 0
+                    is_col_spec = True
+                    for ch in stripped:
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                        elif ch not in 'lrcLRCpP|.1234567890 ':
+                            is_col_spec = False
+                            break
+                    if depth == 0 and is_col_spec:
+                        continue
+                # Match braced column specs with nested braces (e.g. {r|p{11cm}})
+                # Use brace counting since regex can't handle nested braces
+                if line.strip().startswith('{'):
+                    depth = 0
+                    valid_col_spec = True
+                    for ch in line.strip():
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                        elif ch not in 'lrcLRCpP|.1234567890 ':
+                            valid_col_spec = False
+                            break
+                    if depth == 0 and valid_col_spec:
+                        continue
                 cells = line.split('&')
                 row_cells = []
                 for cell in cells:
@@ -607,6 +632,9 @@ def process_content(content, base_dir, repo_root=None):
             return f"<blockquote>{body}</blockquote>"
         elif env_name == "quotation":
             return f"<blockquote>{body}</blockquote>"
+        elif env_name == "minipage":
+            # \begin{minipage}[b]{0.5\linewidth} — strip optional [arg] and {arg}
+            return body
         else:
             return f'<div class="{env_name}">{body}</div>'
     content = re.sub(env_pattern, replace_env, content, flags=re.DOTALL)
