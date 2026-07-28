@@ -641,27 +641,42 @@ def process_content(content, base_dir, repo_root=None):
             return f'<table class="table"><tbody>{"".join(rows)}</tbody></table>'
         elif env_name == "itemize":
             items = []
+            current_item = None
             for line in body.split("\n"):
-                line = line.strip()
-                if line.startswith("\\item"):
-                    rest = line[5:]
+                stripped = line.strip()
+                if stripped.startswith("\\item"):
+                    if current_item is not None:
+                        items.append(f"<li>{current_item}</li>")
+                    rest = stripped[5:]
                     if rest.startswith('['):
                         bracket_end = rest.find(']')
                         if bracket_end != -1:
                             desc = rest[:bracket_end+1].strip()
                             content_text = rest[bracket_end+1:].strip()
-                            items.append(f"<li>{desc} {content_text}</li>")
+                            current_item = f"{desc} {content_text}"
                             continue
-                    line = rest.strip()
-                    items.append(f"<li>{line}</li>")
+                    current_item = rest.strip()
+                elif current_item is not None and stripped:
+                    current_item += f" {stripped}"
+            if current_item is not None:
+                items.append(f"<li>{current_item}</li>")
             return f"<ul>{chr(10).join(items)}</ul>"
         elif env_name == "enumerate":
             items = []
-            for i, line in enumerate(body.split("\n"), 1):
-                line = line.strip()
-                if line.startswith("\\item"):
-                    line = line[5:].strip()
-                    items.append(f"<li>{i}. {line}</li>")
+            current_item = None
+            counter = 0
+            for line in body.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("\\item"):
+                    counter += 1
+                    if current_item is not None:
+                        items.append(f"<li>{counter-1}. {current_item}</li>")
+                    rest = stripped[5:]
+                    current_item = rest.strip()
+                elif current_item is not None and stripped:
+                    current_item += f" {stripped}"
+            if current_item is not None:
+                items.append(f"<li>{counter}. {current_item}</li>")
             return f"<ol>{chr(10).join(items)}</ol>"
         elif env_name == "quote":
             return f"<blockquote>{body}</blockquote>"
