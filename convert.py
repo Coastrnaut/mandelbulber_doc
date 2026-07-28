@@ -133,7 +133,6 @@ def process_command(cmd_match):
     """Process a LaTeX command and return HTML."""
     cmd = cmd_match.group(1)
     args = cmd_match.group(2) or ""
-    args = args.strip("{}")
     parts = [p.strip() for p in args.split(",") if p.strip()]
 
     if cmd == "textbf":
@@ -198,7 +197,9 @@ def process_command(cmd_match):
         if not parts:
             return ""
         rid = _make_heading_id(parts[0], 4)
-        return f"<h4 id='{rid}'>{_process_heading_text(parts[0])}</h4>"
+        # Strip \emph{} even when inner content has HTML tags from prior iterations
+        text = re.sub(r'\\emph\{([^}]*(?:\{[^}]*\})?[^}]*)\}', lambda m: re.sub(r'<[^>]+>', '', m.group(1)), parts[0])
+        return f"<h4 id='{rid}'>{_process_heading_text(text)}</h4>"
     elif cmd == "subparagraph":
         if not parts:
             return ""
@@ -289,7 +290,7 @@ def process_command(cmd_match):
     elif cmd == "textasciicircum":
         return "&#x2038;"
     elif cmd == "textbackslash":
-        return "&#x2039;"
+        return "\\"
     elif cmd == "textasciitilde":
         return "&#x007E;"
     elif cmd == "textem":
@@ -549,7 +550,7 @@ def process_content(content, base_dir, repo_root=None):
         content = re.sub(r'\\' + re.escape(key) + r'\s*', escaped_value, content)
 
     # Process environments
-    env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?\{(?:[^}]*\})*[^}]*\}(.*?)\\end\{\1\}'
+    env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?(?:\{(?:(?:[^{}]*\{[^{}]*\})*[^{}]*)\})?(.*?)\\end\{\1\}'
     def replace_env(m):
         env_name = m.group(1)
         body = m.group(2)
@@ -617,7 +618,15 @@ def process_content(content, base_dir, repo_root=None):
             for line in body.split("\n"):
                 line = line.strip()
                 if line.startswith("\\item"):
-                    line = line[5:].strip()
+                    rest = line[5:]
+                    if rest.startswith('['):
+                        bracket_end = rest.find(']')
+                        if bracket_end != -1:
+                            desc = rest[:bracket_end+1].strip()
+                            content_text = rest[bracket_end+1:].strip()
+                            items.append(f"<li>{desc} {content_text}</li>")
+                            continue
+                    line = rest.strip()
                     items.append(f"<li>{line}</li>")
             return f"<ul>{chr(10).join(items)}</ul>"
         elif env_name == "enumerate":
@@ -754,13 +763,16 @@ def process_content(content, base_dir, repo_root=None):
     content = re.sub(r'^\s*\{[Hh]\}\s*$', '', content, flags=re.MULTILINE)
     # Strip {img/...} remnants from unexpanded makro.tex macros (images don't exist in repo)
     content = re.sub(r'\{img/[^}]+\}', '', content)
+    # Strip stray closing braces/tabs that leak before content
+    content = re.sub(r'\n\s*}\s*\n', '\n', content)
+    
     # Strip bare {caption text} patterns left by makro.tex macro expansion
     content = re.sub(r'\{([^{}]+)\}\s*$', lambda m: m.group(1), content, flags=re.MULTILINE)
     # Strip {text} patterns anywhere in line (not just at end)
     content = re.sub(r'\{([^{}]+)\}', lambda m: m.group(1), content)
     
     # Convert remaining \item commands to <li></li> tags (both open and close)
-    content = re.sub(r'\\item\s*', '<li></li>', content)
+    content = re.sub(r'\\item\s*(.*)', lambda m: '<li>' + m.group(1).rstrip() + '</li>', content, flags=re.MULTILINE)
     
     # Strip bare LaTeX commands that have no HTML equivalent
     for bare_cmd in ['nopagebreak', 'pagebreak', 'clearpage', 'bigskip', 'medskip', 'smallskip',
@@ -800,6 +812,8 @@ def process_content(content, base_dir, repo_root=None):
     content = content.replace('\\\\%', '%')
     content = content.replace('\\\\&', '&')
     content = content.replace('\\\\_', '_')
+    # Fix remaining \\_ -> _ (double-backslash-underscore)
+    content = content.replace('\\\_', '_')
 
     # Math symbols - map to HTML entities
     content = content.replace('\\ast', chr(8727))
@@ -838,6 +852,11 @@ def process_content(content, base_dir, repo_root=None):
     content = content.replace('&amp;euro;', '&euro;')
     content = content.replace('&amp;pound;', '&pound;')
 
+    # Strip orphaned numbers/fragments immediately before heading tags
+    content = re.sub(r'\n\s*\d+\.\d+\s*(?=<h[1-6])', '\n', content)
+    # Also strip orphaned baselinestretch values at content start
+    content = re.sub(r'^\s*\d+\.\d+\s*', '', content)
+    
     # Convert \( ... \) -> $ ... $ for MathJax
     content = re.sub(r'\\\((.*?)\\\)', lambda m: '$' + m.group(1) + '$', content, flags=re.DOTALL)
     # Convert \[ ... \] -> $$ ... $$ for MathJax
