@@ -672,12 +672,21 @@ def process_content(content, base_dir, repo_root=None):
             body = body.replace("\\", "<br>")
             body = body.replace("&", " & ")
             return f'<span class="math-matrix">{body}</span>'
+        elif env_name == "center":
+            # Just a wrapper, return body so nested envs (tabular) get processed
+            return body
         elif env_name == "minipage":
             # \begin{minipage}[b]{0.5\linewidth} — strip optional [arg] and {arg}
             return body
         else:
             return f'<div class="{env_name}">{body}</div>'
-    content = re.sub(env_pattern, replace_env, content, flags=re.DOTALL)
+    # Process environments iteratively to handle nesting (center > tabular)
+    prev = None
+    env_iter = 0
+    while prev != content and env_iter < 10:
+        prev = content
+        content = re.sub(env_pattern, replace_env, content, flags=re.DOTALL)
+        env_iter += 1
 
     # Process \lstinputlisting[caption={...}]{code/path} — code file references
     def replace_lstinputlisting(m):
