@@ -495,7 +495,7 @@ def process_content(content, base_dir, repo_root=None):
             # Remove this definition from content
             # Find the end of the full \newcommand{\cmd_name}{value}
             end_pos = value_start
-            depth = 0
+            depth = 1  # The opening { of the value was already consumed by the regex
             for j in range(value_start, len(content)):
                 if content[j] == '{':
                     depth += 1
@@ -518,8 +518,9 @@ def process_content(content, base_dir, repo_root=None):
         value = extract_command_value(content, value_start, cmd_name)
         if value is not None:
             metadata[cmd_name] = value
+            # Find the end of the full \renewcommand{\cmd_name}{value}
             end_pos = value_start
-            depth = 0
+            depth = 1  # The opening { of the value was already consumed by the regex
             for j in range(value_start, len(content)):
                 if content[j] == '{':
                     depth += 1
@@ -528,10 +529,12 @@ def process_content(content, base_dir, repo_root=None):
                     if depth == 0:
                         end_pos = j + 1
                         break
-            content = content[:pos] + content[end_pos:]
-        pos += m.end()
+            # Use match start position, not search start position
+            match_start = pos + m.start()
+            content = content[:match_start] + content[end_pos:]
+        pos = pos + m.start() + 1
     
-    # After extracting \renewcommand values, strip any leftover \baselinestretch
+    # After extracting renewcommand values, strip any leftover baselinestretch
     # (it's a formatting command, not content)
     content = re.sub(r'\\baselinestretch(\\)?\s*', '', content)
     
