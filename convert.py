@@ -465,6 +465,10 @@ def process_image_macro(content, repo_root=None):
 
 def process_content(content, base_dir, repo_root=None):
     """Main content processing function."""
+    # Math protection registry - populated after file inclusion
+    _math_registry = {}
+    _math_counter = [0]
+    
     # Process \input{} commands first
     input_pattern = r'\\input\{([^}]+)\}'
     def replace_input(m):
@@ -479,6 +483,100 @@ def process_content(content, base_dir, repo_root=None):
         return resolve_input(path, base_dir, repo_root=repo_root)
     content = re.sub(include_pattern, replace_include, content)
 
+    # =====================================================================
+    # PROTECT MATH CONTENT - extract \[...\], \(...\), and $...$ before processing
+    # Must run AFTER file inclusion so math from included files is captured
+    # =====================================================================
+    BS = chr(92)  # backslash character
+    def extract_display_math(text):
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == BS and i + 1 < len(text) and text[i+1] == '[':
+                j = i + 2
+                depth = 1
+                while j < len(text) and depth > 0:
+                    if text[j] == BS and j + 1 < len(text) and text[j+1] == '[':
+                        depth += 1
+                        j += 1
+                    elif text[j] == BS and j + 1 < len(text) and text[j+1] == ']':
+                        depth -= 1
+                        j += 1
+                    j += 1
+                if depth == 0:
+                    math_content = text[i+2:j-2]
+                    _math_counter[0] += 1
+                    key = f"\x00MATH{_math_counter[0]}MATH\x00"
+                    _math_registry[key] = ("display", math_content)
+                    result.append(key)
+                    i = j
+                    continue
+            result.append(text[i])
+            i += 1
+        return ''.join(result)
+    
+    def extract_inline_math(text):
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == BS and i + 1 < len(text) and text[i+1] == '(':
+                j = i + 2
+                depth = 1
+                while j < len(text) and depth > 0:
+                    if text[j] == BS and j + 1 < len(text) and text[j+1] == '(':
+                        depth += 1
+                        j += 1
+                    elif text[j] == BS and j + 1 < len(text) and text[j+1] == ')':
+                        depth -= 1
+                        j += 1
+                    j += 1
+                if depth == 0:
+                    math_content = text[i+2:j-2]
+                    _math_counter[0] += 1
+                    key = f"\x00MATH{_math_counter[0]}MATH\x00"
+                    _math_registry[key] = ("inline", math_content)
+                    result.append(key)
+                    i = j
+                    continue
+            result.append(text[i])
+            i += 1
+        return ''.join(result)
+    
+    def extract_dollar_math(text):
+        # Conservative: $ delimiters should only capture short inline math
+        # Allow at most 1 newline and content < 200 chars to avoid capturing paragraphs
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == '$' and (i + 1 >= len(text) or text[i+1] != '$'):
+                j = i + 1
+                newline_count = 0
+                while j < len(text):
+                    if text[j] == '\n':
+                        newline_count += 1
+                        if newline_count > 1:
+                            break
+                    if text[j] == '$' and (j + 1 >= len(text) or text[j+1] != '$'):
+                        break
+                    j += 1
+                if j < len(text) and text[j] == '$':
+                    math_content = text[i+1:j]
+                    # Only protect if content is short (inline math)
+                    if len(math_content) < 200:
+                        _math_counter[0] += 1
+                        key = f"\x00MATH{_math_counter[0]}MATH\x00"
+                        _math_registry[key] = ("inline", math_content)
+                        result.append(key)
+                        i = j + 1
+                        continue
+            result.append(text[i])
+            i += 1
+        return ''.join(result)
+    
+    content = extract_display_math(content)
+    content = extract_inline_math(content)
+    content = extract_dollar_math(content)
+    
     # Extract \newcommand definitions to a dict, then replace bare \mX refs
     metadata = {}
     
@@ -931,10 +1029,20 @@ def process_content(content, base_dir, repo_root=None):
 
     # Strip trailing \\ (LaTeX line breaks) that leaked outside tabular
     content = re.sub(r'\\\\\s*(?=\n|<)', '', content)
-    # Convert \( ... \) -> $ ... $ for MathJax
-    content = re.sub(r'\\\((.*?)\\\)', lambda m: '$' + m.group(1) + '$', content, flags=re.DOTALL)
-    # Convert \[ ... \] -> $$ ... $$ for MathJax
-    content = re.sub(r'\\\[(.*?)\\\]', lambda m: '$$' + m.group(1).strip() + '$$', content, flags=re.DOTALL)
+    
+    # =====================================================================
+    # RESTORE MATH CONTENT - unwrap protected math and wrap for MathJax
+    # =====================================================================
+    print(f"DEBUG: Math registry has {len(_math_registry)} entries")
+    for key, (math_type, math_content) in _math_registry.items():
+        preview = math_content[:60].replace('\n', '\\n')
+        print(f"  [{math_type}] {preview}")
+    for key, (math_type, math_content) in _math_registry.items():
+        if math_type == "display":
+            wrapped = '$$' + math_content.strip() + '$$'
+        else:
+            wrapped = '$' + math_content.strip() + '$'
+        content = content.replace(key, wrapped)
 
     
     return content
