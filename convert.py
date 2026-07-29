@@ -1021,6 +1021,8 @@ def process_content(content, base_dir, repo_root=None):
     ol_closes = len(re.findall(r'</ol>', content))
     li_opens = len(re.findall(r'<li>', content))
     li_closes = len(re.findall(r'</li>', content))
+    div_opens = len(re.findall(r'<div[^/]', content))
+    div_closes = len(re.findall(r'</div>', content))
     missing = ""
     if li_opens > li_closes:
         missing += "</li>" * (li_opens - li_closes)
@@ -1035,6 +1037,8 @@ def process_content(content, base_dir, repo_root=None):
         else:
             content = content + missing
     
+
+
     # =====================================================================
     # WRAP PARAGRAPHS - wrap unwrapped text in <p> tags
     # =====================================================================
@@ -1071,8 +1075,8 @@ def process_content(content, base_dir, repo_root=None):
         block_depth += pre_opens + table_opens - pre_closes - table_closes
         block_depth = max(0, block_depth)
         
-        # If entering or inside a block element, don't wrap in <p>
-        if block_depth > 0 or (pre_opens > 0 and old_depth == 0):
+        # If entering, inside, or exiting a block element, don't wrap in <p>
+        if block_depth > 0 or old_depth > 0 or pre_opens or pre_closes or table_opens or table_closes:
             paragraph_buffer = []
             result.append(line)
             continue
@@ -1099,7 +1103,105 @@ def process_content(content, base_dir, repo_root=None):
     flush_paragraph()
     
     content = '\n'.join(result)
-    
+
+    # =====================================================================
+    # WRAP PARAGRAPHS - wrap unwrapped text in <p> tags
+    # =====================================================================
+    wrap_lines = content.split('\n')
+    result = []
+    paragraph_buffer = []
+    block_depth = 0
+
+    def flush_paragraph():
+        nonlocal paragraph_buffer
+        if paragraph_buffer:
+            text = ' '.join(t.strip() for t in paragraph_buffer if t.strip())
+            if text:
+                result.append('<p>' + text + '</p>')
+            paragraph_buffer = []
+
+    for line in wrap_lines:
+        stripped = line.strip()
+        if not stripped:
+            if block_depth == 0:
+                flush_paragraph()
+            else:
+                paragraph_buffer = []
+            continue
+
+        pre_opens = len(re.findall(r'<pre[^>]*>', stripped, re.IGNORECASE))
+        pre_closes = len(re.findall(r'</pre>', stripped, re.IGNORECASE))
+        table_opens = len(re.findall(r'<table[^>]*>', stripped, re.IGNORECASE))
+        table_closes = len(re.findall(r'</table>', stripped, re.IGNORECASE))
+
+        old_depth = block_depth
+        block_depth += pre_opens + table_opens - pre_closes - table_closes
+        block_depth = max(0, block_depth)
+
+        if block_depth > 0 or old_depth > 0 or pre_opens or table_opens or pre_closes or table_closes:
+            paragraph_buffer = []
+            result.append(line)
+            continue
+
+        if re.match(r'^<(h[1-6]|ul|ol|li|table|tr|td|th|div|hr|pre|img|p|span|figcaption|br)', stripped, re.IGNORECASE):
+            flush_paragraph()
+            result.append(line)
+            continue
+        if re.match(r'^</?(h[1-6]|ul|ol|li|table|tr|td|th|div|pre|p|span|figcaption|br)[^>]*>$', stripped, re.IGNORECASE):
+            flush_paragraph()
+            result.append(line)
+            continue
+        if re.match(r'^<[^>]+>$', stripped, re.IGNORECASE):
+            flush_paragraph()
+            result.append(line)
+            continue
+
+        paragraph_buffer.append(stripped)
+
+    flush_paragraph()
+    content = '\n'.join(result)
+
+    # Cleanup: remove stray <p> tags inside <pre> blocks
+    def remove_p_in_pre(match):
+        pre_block = match.group(0)
+        pre_block = re.sub(r'</?p\b[^>]*>', '', pre_block)
+        return pre_block
+    content = re.sub(r'<pre[^>]*>.*?</pre>', remove_p_in_pre, content, flags=re.DOTALL)
+
+
+    # =====================================================================
+    # BALANCE unclosed tags from nested enumerate/itemize and env processing
+    # =====================================================================
+    ul_opens = len(re.findall(r'<ul', content))
+    ul_closes = len(re.findall(r'</ul>', content))
+    ol_opens = len(re.findall(r'<ol', content))
+    ol_closes = len(re.findall(r'</ol>', content))
+    li_opens = len(re.findall(r'<li>', content))
+    li_closes = len(re.findall(r'</li>', content))
+    div_opens = len(re.findall(r'<div[^/]', content))
+    div_closes = len(re.findall(r'</div>', content))
+    missing = ""
+    extra = ""
+    if li_opens > li_closes:
+        missing += "</li>" * (li_opens - li_closes)
+    if ol_opens > ol_closes:
+        missing += "</ol>" * (ol_opens - ol_closes)
+    if ul_opens > ul_closes:
+        missing += "</ul>" * (ul_opens - ul_closes)
+    # Remove any extra </div> tags from content (titlepage/document wrappers)
+    if div_closes > div_opens:
+        extra_divs = div_closes - div_opens
+        for _ in range(extra_divs):
+            last_div = content.rfind("</div>")
+            if last_div >= 0:
+                content = content[:last_div] + content[last_div+7:]
+    if missing:
+        if "</body>" in content:
+            content = content.replace("</body>", missing + "</body>", 1)
+        else:
+            content = content + missing
+
+
     return content
 
 
