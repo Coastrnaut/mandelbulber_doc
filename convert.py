@@ -483,6 +483,11 @@ def process_content(content, base_dir, repo_root=None):
         return resolve_input(path, base_dir, repo_root=repo_root)
     content = re.sub(include_pattern, replace_include, content)
 
+    # Strip LaTeX grouping parens around $ math like ($ ... $)
+    # These are common in mandelbulber source and cause ($ artifacts
+    content = re.sub(r'\(\$', '$', content)
+    content = re.sub(r'\$\)', '$', content)
+    
     # =====================================================================
     # PROTECT MATH CONTENT - extract \[...\], \(...\), and $...$ before processing
     # Must run AFTER file inclusion so math from included files is captured
@@ -1034,12 +1039,38 @@ def process_content(content, base_dir, repo_root=None):
     # RESTORE MATH CONTENT - unwrap protected math and wrap for MathJax
     # =====================================================================
     for key, (math_type, math_content) in _math_registry.items():
+        # Strip leading/trailing parens from math content (LaTeX grouping like ($ ... $))
+        math_content = math_content.strip()
+        if math_content.startswith('(') and math_content.endswith(')'):
+            math_content = math_content[1:-1].strip()
         if math_type == "display":
-            wrapped = '$$' + math_content.strip() + '$$'
+            wrapped = '\n$$' + math_content.strip() + '$$\n'
         else:
-            wrapped = '$' + math_content.strip() + '$'
+            # Add space before $ if preceded by alphanumeric/punctuation, after $ if followed by such
+            wrapped = ' $' + math_content.strip() + '$ '
         content = content.replace(key, wrapped)
 
+    
+    # Balance unclosed list tags from nested enumerate/itemize
+    ul_opens = len(re.findall(r'<ul', content))
+    ul_closes = len(re.findall(r'</ul>', content))
+    ol_opens = len(re.findall(r'<ol', content))
+    ol_closes = len(re.findall(r'</ol>', content))
+    li_opens = len(re.findall(r'<li>', content))
+    li_closes = len(re.findall(r'</li>', content))
+    missing = ""
+    if li_opens > li_closes:
+        missing += "</li>" * (li_opens - li_closes)
+    if ol_opens > ol_closes:
+        missing += "</ol>" * (ol_opens - ol_closes)
+    if ul_opens > ul_closes:
+        missing += "</ul>" * (ul_opens - ul_closes)
+    if missing:
+        # Insert before </body> or at end
+        if "</body>" in content:
+            content = content.replace("</body>", missing + "</body>", 1)
+        else:
+            content = content + missing
     
     return content
 
@@ -1100,7 +1131,26 @@ def generate_html(title, content, toc):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TITLE_PLACEHOLDER</title>
 <link rel="stylesheet" href="css/style.css">
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['$', '$'], ['\\(', '\\)']],
+    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    processEscapes: true,
+    processEnvironments: true,
+    packages: {'[+]': 'ams'}
+  },
+  options: {
+    skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+  },
+  startup: {
+    ready: function() {
+      MathJax.startup.defaultReady();
+    }
+  }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
 <h1>TITLE_PLACEHOLDER</h1>
