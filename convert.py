@@ -288,10 +288,7 @@ def process_command(cmd_match):
         return f"<span style='font-family:sans-serif'>{parts[0]}</span>" if parts else ""
     elif cmd == "textup":
         return parts[0] if parts else ""
-    elif cmd == "textrm":
-        return parts[0] if parts else ""
     elif cmd == "frac":
-        # \frac{num}{den} — parts[0] is num, parts[1] is den (two separate brace args)
         if len(parts) >= 2:
             return f"<sup>{parts[0]}</sup>/<sub>{parts[1]}</sub>"
         return parts[0] if parts else ""
@@ -300,7 +297,7 @@ def process_command(cmd_match):
     elif cmd == "begin":
         return f"<span class='begin-{parts[0]}'>" if parts else ""
     elif cmd == "end":
-        return f"</span>" if parts else ""
+        return "</span>" if parts else ""
     elif cmd == "textgreater":
         return "&gt;"
     elif cmd == "textless":
@@ -312,7 +309,7 @@ def process_command(cmd_match):
     elif cmd == "textasciicircum":
         return "&#x2038;"
     elif cmd == "textbackslash":
-        return "\\"
+        return "\\\\"
     elif cmd == "textasciitilde":
         return "&#x007E;"
     elif cmd == "textem":
@@ -321,8 +318,6 @@ def process_command(cmd_match):
         return "1.5"
     elif cmd == "textonequarter":
         return "0.25"
-    elif cmd == "textonehalf":
-        return "1.5"
     elif cmd == "textthreequarters":
         return "0.75"
     elif cmd == "textfractionsolidus":
@@ -333,48 +328,12 @@ def process_command(cmd_match):
         return "&#x00AE;"
     elif cmd == "textcopyright":
         return "&#x00A9;"
-    elif cmd == "textless":
-        return "&lt;"
-    elif cmd == "textgreater":
-        return "&gt;"
     elif cmd == "textbar":
         return "&#x00A6;"
     elif cmd == "textbraceleft":
         return "{"
     elif cmd == "textbraceright":
         return "}"
-    elif cmd == "texttt":
-        return f"<code>{parts[0]}</code>" if parts else ""
-    elif cmd == "tt":
-        return f"<code>{parts[0]}</code>" if parts else ""
-    elif cmd == "bf":
-        return f"<strong>{parts[0]}</strong>" if parts else ""
-    elif cmd == "it":
-        return f"<em>{parts[0]}</em>" if parts else ""
-    elif cmd == "text":
-        # \text{...} in math mode - just return the content
-        return parts[0] if parts else ""
-    elif cmd == "mathrm":
-        # \mathrm{...} in math mode - just return the content
-        return parts[0] if parts else ""
-    elif cmd == "mathbf":
-        return f"<strong>{parts[0]}</strong>" if parts else ""
-    elif cmd == "mathit":
-        return f"<em>{parts[0]}</em>" if parts else ""
-    elif cmd == "textsuperscript":
-        return f"<sup>{parts[0]}</sup>" if parts else ""
-    elif cmd == "textsubscript":
-        return f"<sub>{parts[0]}</sub>" if parts else ""
-    elif cmd == "smallcaps":
-        return f"<span style='font-variant:small-caps'>{parts[0]}</span>" if parts else ""
-    elif cmd == "underline":
-        return f"<u>{parts[0]}</u>" if parts else ""
-    elif cmd == "sout":
-        return f"<s>{parts[0]}</s>" if parts else ""
-    elif cmd == "large":
-        return f"<span style='font-size:1.2em'>{parts[0]}</span>" if parts else ""
-    elif cmd == "Large":
-        return f"<span style='font-size:1.5em'>{parts[0]}</span>" if parts else ""
 
 
 def process_image_macro(content, repo_root=None):
@@ -1050,6 +1009,10 @@ def process_content(content, base_dir, repo_root=None):
             wrapped = ' $' + math_content.strip() + '$ '
         content = content.replace(key, wrapped)
 
+    # Convert literal [a], [b], [c] etc. to HTML entities to prevent MathJax from treating them as math
+    # These are common in mandelbulber source as references to variables
+    content = re.sub(r'\[([a-zA-Z0-9_]+)\]', r'&#91;\1&#93;', content)
+
     
     # Balance unclosed list tags from nested enumerate/itemize
     ul_opens = len(re.findall(r'<ul', content))
@@ -1071,6 +1034,71 @@ def process_content(content, base_dir, repo_root=None):
             content = content.replace("</body>", missing + "</body>", 1)
         else:
             content = content + missing
+    
+    # =====================================================================
+    # WRAP PARAGRAPHS - wrap unwrapped text in <p> tags
+    # =====================================================================
+    lines = content.split('\n')
+    result = []
+    paragraph_buffer = []
+    block_depth = 0  # Track nesting inside <pre>, <table>
+    
+    def flush_paragraph():
+        nonlocal paragraph_buffer
+        if paragraph_buffer:
+            text = ' '.join(t.strip() for t in paragraph_buffer if t.strip())
+            if text:
+                result.append('<p>' + text + '</p>')
+            paragraph_buffer = []
+    
+    for line in lines:
+        stripped = line.strip()
+        # Skip empty lines
+        if not stripped:
+            if block_depth == 0:
+                flush_paragraph()
+            else:
+                paragraph_buffer = []
+            continue
+        
+        # Count ALL open/close tags on this line for block elements
+        pre_opens = len(re.findall(r'<pre[^>]*>', stripped, re.IGNORECASE))
+        pre_closes = len(re.findall(r'</pre>', stripped, re.IGNORECASE))
+        table_opens = len(re.findall(r'<table[^>]*>', stripped, re.IGNORECASE))
+        table_closes = len(re.findall(r'</table>', stripped, re.IGNORECASE))
+        
+        old_depth = block_depth
+        block_depth += pre_opens + table_opens - pre_closes - table_closes
+        block_depth = max(0, block_depth)
+        
+        # If entering or inside a block element, don't wrap in <p>
+        if block_depth > 0 or (pre_opens > 0 and old_depth == 0):
+            paragraph_buffer = []
+            result.append(line)
+            continue
+        
+        # Skip lines that are already HTML block elements
+        if re.match(r'^<(h[1-6]|ul|ol|li|table|tr|td|th|div|hr|pre|img|p|span|figcaption|br)', stripped, re.IGNORECASE):
+            flush_paragraph()
+            result.append(line)
+            continue
+        # Skip lines that are ONLY closing tags
+        if re.match(r'^</?(h[1-6]|ul|ol|li|table|tr|td|th|div|pre|p|span|figcaption|br)[^>]*>$', stripped, re.IGNORECASE):
+            flush_paragraph()
+            result.append(line)
+            continue
+        # Skip lines that are ONLY HTML tags (no text content)
+        if re.match(r'^<[^>]+>$', stripped, re.IGNORECASE):
+            flush_paragraph()
+            result.append(line)
+            continue
+        # This is text content - add to paragraph buffer
+        paragraph_buffer.append(stripped)
+    
+    # Flush any remaining paragraph
+    flush_paragraph()
+    
+    content = '\n'.join(result)
     
     return content
 
@@ -1135,9 +1163,9 @@ def generate_html(title, content, toc):
 window.MathJax = {
   tex: {
     inlineMath: [['$', '$'], ['\\(', '\\)']],
-    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    displayMath: [['$$', '$$']],
     processEscapes: true,
-    processEnvironments: true,
+    processEnvironments: false,
     packages: {'[+]': 'ams'}
   },
   options: {
