@@ -506,7 +506,7 @@ def process_content(content, base_dir, repo_root=None):
                 if depth == 0:
                     math_content = text[i+2:j-2]
                     _math_counter[0] += 1
-                    key = f"\x00MATH{_math_counter[0]}MATH\x00"
+                    key = f"__MATH_PLACEHOLDER_{_math_counter[0]}__"
                     _math_registry[key] = ("display", math_content)
                     result.append(key)
                     i = j
@@ -533,7 +533,7 @@ def process_content(content, base_dir, repo_root=None):
                 if depth == 0:
                     math_content = text[i+2:j-2]
                     _math_counter[0] += 1
-                    key = f"\x00MATH{_math_counter[0]}MATH\x00"
+                    key = f"__MATH_PLACEHOLDER_{_math_counter[0]}__"
                     _math_registry[key] = ("inline", math_content)
                     result.append(key)
                     i = j
@@ -564,7 +564,7 @@ def process_content(content, base_dir, repo_root=None):
                     # Only protect if content is short (inline math)
                     if len(math_content) < 200:
                         _math_counter[0] += 1
-                        key = f"\x00MATH{_math_counter[0]}MATH\x00"
+                        key = f"__MATH_PLACEHOLDER_{_math_counter[0]}__"
                         _math_registry[key] = ("inline", math_content)
                         result.append(key)
                         i = j + 1
@@ -1033,10 +1033,6 @@ def process_content(content, base_dir, repo_root=None):
     # =====================================================================
     # RESTORE MATH CONTENT - unwrap protected math and wrap for MathJax
     # =====================================================================
-    print(f"DEBUG: Math registry has {len(_math_registry)} entries")
-    for key, (math_type, math_content) in _math_registry.items():
-        preview = math_content[:60].replace('\n', '\\n')
-        print(f"  [{math_type}] {preview}")
     for key, (math_type, math_content) in _math_registry.items():
         if math_type == "display":
             wrapped = '$$' + math_content.strip() + '$$'
