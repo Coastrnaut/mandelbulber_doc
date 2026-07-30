@@ -1270,6 +1270,7 @@ body {
     line-height: 1.6;
     color: #333;
     background: #fff;
+    padding-left: 60px;
 }
 
 h1 {
@@ -1343,14 +1344,15 @@ h1 {
 
 /* Content area */
 #content {
-    margin-left: 0;
+    margin-left: 40px;
+    margin-right: auto;
     padding: 2em 3em;
     max-width: 900px;
     transition: margin-left 0.3s ease;
 }
 
 .sidebar.open ~ #content {
-    margin-left: 280px;
+    margin-left: 288px;
 }
 
 #content h1, #content h2, #content h3, #content h4, #content h5 {
