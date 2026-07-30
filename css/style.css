@@ -2,6 +2,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
+    overflow-x: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     line-height: 1.6;
     color: #333;
@@ -31,6 +32,11 @@ h1 {
     display: flex;
     flex-direction: column;
     transition: transform 0.3s ease;
+    transform: translateX(-100%);
+}
+
+.sidebar.open {
+    transform: translateX(0);
 }
 
 .sidebar h3 {
@@ -74,9 +80,14 @@ h1 {
 
 /* Content area */
 #content {
-    margin-left: 280px;
+    margin-left: 0;
     padding: 2em 3em;
     max-width: 900px;
+    transition: margin-left 0.3s ease;
+}
+
+.sidebar.open ~ #content {
+    margin-left: 280px;
 }
 
 #content h1, #content h2, #content h3, #content h4, #content h5 {
@@ -162,7 +173,7 @@ h1 {
 
 /* Collapsible toggle */
 .sidebar-toggle {
-    display: none;
+    display: block;
     position: fixed;
     top: 0.8em;
     left: 0.8em;
@@ -176,19 +187,16 @@ h1 {
     font-size: 1.2em;
 }
 
+.sidebar-toggle.shifted {
+    left: 288px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
-    .sidebar {
-        transform: translateX(-100%);
-    }
-    .sidebar.open {
-        transform: translateX(0);
-    }
-    .sidebar-toggle {
-        display: block;
+    .sidebar.open ~ #content {
+        margin-left: 0;
     }
     #content {
-        margin-left: 0;
-        padding: 4em 1.2em 2em;
+        padding: 2em 1.2em;
     }
 }
