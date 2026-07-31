@@ -7,15 +7,6 @@ body {
     line-height: 1.6;
     color: #333;
     background: #fff;
-    padding-left: 60px;
-}
-
-h1 {
-    text-align: center;
-    padding: 2em 1em 1em;
-    font-size: 2em;
-    border-bottom: 1px solid #eee;
-    margin-bottom: 0;
 }
 
 /* Sidebar TOC */
@@ -82,14 +73,13 @@ h1 {
 /* Content area */
 #content {
     margin-left: 40px;
-    margin-right: auto;
     padding: 2em 3em;
     max-width: 900px;
     transition: margin-left 0.3s ease;
 }
 
-.sidebar.open ~ #content {
-    margin-left: 288px;
+#content.sidebar-open {
+    margin-left: 288px !important;
 }
 
 #content h1, #content h2, #content h3, #content h4, #content h5 {
@@ -195,9 +185,6 @@ h1 {
 
 /* Responsive */
 @media (max-width: 768px) {
-    .sidebar.open ~ #content {
-        margin-left: 0;
-    }
     #content {
         padding: 2em 1.2em;
     }
