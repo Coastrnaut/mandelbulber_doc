@@ -1270,15 +1270,6 @@ body {
     line-height: 1.6;
     color: #333;
     background: #fff;
-    padding-left: 60px;
-}
-
-h1 {
-    text-align: center;
-    padding: 2em 1em 1em;
-    font-size: 2em;
-    border-bottom: 1px solid #eee;
-    margin-bottom: 0;
 }
 
 /* Sidebar TOC */
@@ -1345,14 +1336,13 @@ h1 {
 /* Content area */
 #content {
     margin-left: 40px;
-    margin-right: auto;
     padding: 2em 3em;
     max-width: 900px;
     transition: margin-left 0.3s ease;
 }
 
-.sidebar.open ~ #content {
-    margin-left: 288px;
+#content.sidebar-open {
+    margin-left: 288px !important;
 }
 
 #content h1, #content h2, #content h3, #content h4, #content h5 {
@@ -1458,9 +1448,6 @@ h1 {
 
 /* Responsive */
 @media (max-width: 768px) {
-    .sidebar.open ~ #content {
-        margin-left: 0;
-    }
     #content {
         padding: 2em 1.2em;
     }
@@ -1489,7 +1476,7 @@ window.MathJax = {
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
-<button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open'); this.classList.toggle('shifted');">☰ TOC</button>
+<button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open'); document.getElementById('content').classList.toggle('sidebar-open'); this.classList.toggle('shifted');">☰ TOC</button>
 TOC_PLACEHOLDER
 <div id="content">
 <h1>TITLE_PLACEHOLDER</h1>
@@ -1497,6 +1484,28 @@ CONTENT_PLACEHOLDER
 </div>
 </body>
 </html>"""
+    # Balance divs in content to prevent premature closing of #content wrapper
+    # Track depth and remove </div> that would cause depth to go negative
+    tags = re.findall(r'<div[^>]*>|</div>|.', content)
+    depth = 0
+    filtered = []
+    for tag in tags:
+        if tag.startswith('<div') and not tag.startswith('</'):
+            depth += 1
+            filtered.append(tag)
+        elif tag == '</div>':
+            if depth > 0:
+                depth -= 1
+                filtered.append(tag)
+            # else: skip excess </div>
+        else:
+            filtered.append(tag)
+    content = ''.join(filtered)
+    # Add any missing closing divs
+    while depth > 0:
+        content += '</div>'
+        depth -= 1
+    
     return (
         html.replace("TITLE_PLACEHOLDER", escape(title), 2)
         .replace("TOC_PLACEHOLDER", toc)
