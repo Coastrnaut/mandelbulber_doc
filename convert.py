@@ -71,6 +71,8 @@ def resolve_input(path, base_dir, repo_root=None):
         sub_path = m.group(1) + '.tex'
         return resolve_input(sub_path, base_dir, repo_root=repo_root)
     content = re.sub(include_pattern, replace_include, content)
+    # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
+    
     return content
 
 
@@ -1246,6 +1248,27 @@ def process_content(content, base_dir, repo_root=None):
         else:
             content = content + missing
 
+
+    # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
+    content = content.replace('amp;', '&amp;')
+
+    # Pair images with their following caption paragraphs
+    # Pattern: <img ... /><p>Caption text</p> -> <figure><img ... /><figcaption>Figure X.Y: Caption</figcaption></figure>
+    def pair_image_caption(m):
+        global _figure_counter
+        _figure_counter[0] += 1
+        sec = _section_counter[0]
+        fig_num = f"{sec}.{_figure_counter[0]}"
+        img_tag = m.group(1)
+        caption = m.group(2)
+        return f'<figure class="figure">{img_tag}<figcaption class="caption">Figure {fig_num}: {caption}</figcaption></figure>'
+    
+    # Match <img ... /> followed by <p>...</p> (the caption paragraph)
+    content = re.sub(
+        r'(<img[^>]+/>)\s*<p>([^<]*)</p>',
+        pair_image_caption,
+        content
+    )
 
     return content
 
