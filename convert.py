@@ -623,6 +623,17 @@ def process_content(content, base_dir, repo_root=None):
     # (it's a formatting command, not content)
     content = re.sub(r'\\baselinestretch(\\)?\s*', '', content)
     
+    # Extract verbatim environments BEFORE macro replacement to protect their content
+    _verbatim_registry = {}
+    _verbatim_counter = [0]
+    verbatim_pattern = r'\\begin\{verbatim\}(.*?)\\end\{verbatim\}'
+    def protect_verbatim(m):
+        _verbatim_counter[0] += 1
+        key = f'__VERBATIM_{_verbatim_counter[0]}__'
+        _verbatim_registry[key] = m.group(1)
+        return key
+    content = re.sub(verbatim_pattern, protect_verbatim, content, flags=re.DOTALL)
+    
     # Replace bare \\mX commands with extracted values
     for key, value in metadata.items():
         # Escape backslashes in value for use in re.sub replacement string
@@ -637,6 +648,10 @@ def process_content(content, base_dir, repo_root=None):
         content = re.sub(pattern_x, replace_mx_braced, content)
         content = re.sub(r'\\' + re.escape(key) + r'\s*', escaped_value, content)
 
+    # Restore protected verbatim environments
+    for key, body in _verbatim_registry.items():
+        content = content.replace(key, '<pre class="verbatim">' + escape(body) + '</pre>')
+    
     # Process environments
     env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?(?:\{(?:(?:[^{}]*\{[^{}]*\})*[^{}]*)\})?(.*?)\\end\{\1\}'
     def replace_env(m):
@@ -921,9 +936,13 @@ def process_content(content, base_dir, repo_root=None):
     # Huge - size command without args in output, strip
     content = re.sub(r'\\Huge\s*', '', content)
 
-    # Program, Mandelbulber - custom macros, strip
+    # Program, Mandelbulber - custom macros, strip (skip inside <pre> blocks)
     for custom_cmd in ['Program', 'Mandelbulber']:
-        content = re.sub(r'\\' + custom_cmd + r'\s*', '', content)
+        def strip_outside_pre(m):
+            before = m.string[:m.start()]
+            in_pre = before.count('<pre') - before.count('</pre>')
+            return '' if in_pre == 0 else m.group(0)
+        content = re.sub(r'\\' + custom_cmd + r'\s*', strip_outside_pre, content)
 
     # hline - table horizontal line -> <hr>
     content = re.sub(r'\\hline', '<hr>', content)
@@ -1485,21 +1504,21 @@ CONTENT_PLACEHOLDER
 </body>
 </html>"""
     # Balance divs in content to prevent premature closing of #content wrapper
-    # Track depth and remove </div> that would cause depth to go negative
-    tags = re.findall(r'<div[^>]*>|</div>|.', content)
+    # Tokenize into div tags and non-div text (preserves all content)
+    tokens = re.split(r'(<div[^>]*>|</div>)', content)
     depth = 0
     filtered = []
-    for tag in tags:
-        if tag.startswith('<div') and not tag.startswith('</'):
+    for token in tokens:
+        if token.startswith('<div') and not token.startswith('</'):
             depth += 1
-            filtered.append(tag)
-        elif tag == '</div>':
+            filtered.append(token)
+        elif token == '</div>':
             if depth > 0:
                 depth -= 1
-                filtered.append(tag)
+                filtered.append(token)
             # else: skip excess </div>
         else:
-            filtered.append(tag)
+            filtered.append(token)
     content = ''.join(filtered)
     # Add any missing closing divs
     while depth > 0:
