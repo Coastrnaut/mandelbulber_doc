@@ -1285,35 +1285,33 @@ def process_content(content, base_dir, repo_root=None):
             _figure_counter[0] = 0
             sec_num = int(h1_match.group(1))
         else:
-            # Only pair images that have actual caption text
-            def try_pair(m, _sec=sec_num):
+            # Single pass: match all image+caption patterns in document order
+            def pair_all(m, _sec=sec_num):
                 img = m.group(1)
-                cap = (m.group(2) or m.group(3) or '').strip()
+                # Check which group matched
+                cap = (m.group(2) or m.group(3) or m.group(4) or '').strip()
                 if cap:
                     _figure_counter[0] += 1
                     fn = f"{_sec}.{_figure_counter[0]}"
-                    return f'<figure class="figure">{img}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure>' + ('</li>' if m.group(3) else '')
+                    fig = f'<figure class="figure">{img}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure>'
+                    # Return appropriate closing based on which pattern matched
+                    if m.group(3):  # </li> pattern
+                        return fig + '</li>'
+                    elif m.group(4):  # bare text pattern
+                        return fig + ' ' + m.group(5)
+                    else:
+                        return fig
                 else:
-                    # No caption - just return the image as-is
-                    return img + ('</li>' if m.group(3) else '')
-            # Match <img> followed by either <p>caption</p> or bare caption before </li>
+                    # No caption - return as-is
+                    if m.group(3):
+                        return img + '</li>'
+                    elif m.group(4):
+                        return img + '  ' + m.group(5)
+                    return img
+            # Combined pattern: <img> followed by <p>cap</p>, bare cap before </li>, or bare cap + double-space
             part = re.sub(
-                r'(<img[^>]+/>)\s*(?:<p>([^<]*)</p>|([^<]*?)\s*</li>)',
-                try_pair,
-                part
-            )
-            # Also match bare caption text after <img> that's followed by more paragraph text
-            def try_pair_bare(m, _sec=sec_num):
-                cap = (m.group(2) or '').strip()
-                if cap:
-                    _figure_counter[0] += 1
-                    fn = f"{_sec}.{_figure_counter[0]}"
-                    return f'<figure class="figure">{m.group(1)}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure> {m.group(3)}'
-                else:
-                    return m.group(0)
-            part = re.sub(
-                r'(<img[^>]+/>)\s*([^<]+?)\s{2,}([^<])',
-                try_pair_bare,
+                r'(<img[^>]+/>)(?:\s*<p>([^<]*)</p>|\s*([^<]*?)\s*</li>|\s*([^<]+?)\s{2,}([^<]))',
+                pair_all,
                 part
             )
             paired.append(part)
