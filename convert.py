@@ -19,6 +19,9 @@ _heading_counter = [0]
 _section_counter = [0]   # section number
 _subsection_counter = [0]  # subsection number
 _subsubsection_counter = [0]  # subsubsection number
+_paragraph_counter = [0]  # paragraph number
+_subparagraph_counter = [0]  # subparagraph number
+_figure_counter = [0]     # figure number
 
 
 def parse_args():
@@ -218,14 +221,18 @@ def process_command(cmd_match):
     elif cmd == "paragraph":
         if not parts:
             return ""
-        rid = _make_heading_id(parts[0], 4)
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}.{_paragraph_counter[0]}"
+        _paragraph_counter[0] += 1
+        rid = sec_num.replace('.', '-')
         # Strip \emph{} even when inner content has HTML tags from prior iterations
         text = re.sub(r'\\emph\{([^}]*(?:\{[^}]*\})?[^}]*)\}', lambda m: re.sub(r'<[^>]+>', '', m.group(1)), parts[0])
         return f"<h4 id='{rid}'>{_process_heading_text(text)}</h4>"
     elif cmd == "subparagraph":
         if not parts:
             return ""
-        rid = _make_heading_id(parts[0], 5)
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}.{_paragraph_counter[0]}.{_subparagraph_counter[0]}"
+        _subparagraph_counter[0] += 1
+        rid = sec_num.replace('.', '-')
         return f"<h5 id='{rid}'>{_process_heading_text(parts[0])}</h5>"
     elif cmd == "textcolor":
         # \textcolor{color}{text} - parts[0] is color, parts[1] is text
