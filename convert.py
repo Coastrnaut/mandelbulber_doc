@@ -161,13 +161,15 @@ def process_command(cmd_match):
     elif cmd == "url":
         return f'<a href="{parts[0]}">{parts[0]}</a>' if parts else ""
     elif cmd == "email":
-        return f'<a href="mailto:{parts[0]}">{parts[0]}</a>' if parts else ""
+        return f'<a href="mailto:{parts[0]}">{parts[0].replace("mailto:", "")}</a>' if parts else ""
     elif cmd == "href":
         # \href{url}{text} - parts[0] is url, parts[1] is text
         if len(parts) >= 2:
-            return f'<a href="{parts[0]}">{parts[1]}</a>'
+            display = parts[1].replace("mailto:", "")
+            return f'<a href="{parts[0]}">{display}</a>'
         elif parts:
-            return f'<a href="{parts[0]}">{parts[0]}</a>'
+            display = parts[0].replace("mailto:", "")
+            return f'<a href="{parts[0]}">{display}</a>'
         return ""
     elif cmd == "index":
         return f'<span class="index-marker" data-index="{parts[0]}"></span>' if parts else ""
@@ -196,7 +198,7 @@ def process_command(cmd_match):
         _subsection_counter[0] = 0
         _subsubsection_counter[0] = 0
         sec_num = f"{_section_counter[0]}"
-        rid = _make_heading_id(parts[0], 1)
+        rid = sec_num.replace('.', '-')
         return f"<h1 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h1>"
     elif cmd == "subsection":
         if not parts:
@@ -204,14 +206,14 @@ def process_command(cmd_match):
         _subsection_counter[0] += 1
         _subsubsection_counter[0] = 0
         sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}"
-        rid = _make_heading_id(parts[0], 2)
+        rid = sec_num.replace('.', '-')
         return f"<h2 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h2>"
     elif cmd == "subsubsection":
         if not parts:
             return ""
         _subsubsection_counter[0] += 1
         sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}"
-        rid = _make_heading_id(parts[0], 3)
+        rid = sec_num.replace('.', '-')
         return f"<h3 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h3>"
     elif cmd == "paragraph":
         if not parts:
@@ -301,7 +303,7 @@ def process_command(cmd_match):
     elif cmd == "textgreater":
         return "&gt;"
     elif cmd == "textless":
-        return "&lt;"
+        return "\\"
     elif cmd == "textperiodcentered":
         return "&middot;"
     elif cmd == "textvisiblespace":
@@ -947,10 +949,14 @@ def process_content(content, base_dir, repo_root=None):
     # hline - table horizontal line -> <hr>
     content = re.sub(r'\\hline', '<hr>', content)
 
-    # Render \caption{...} as visible captions (not strip them)
+    # Render \caption{...} as visible captions with numbering
     def replace_caption(m):
+        global _figure_counter
+        _figure_counter[0] += 1
+        sec = _section_counter[0]
+        fig_num = f"{sec}.{_figure_counter[0]}"
         caption_text = m.group(1)
-        return f'<figcaption class="caption">{caption_text}</figcaption>'
+        return f'<figcaption class="caption">Figure {fig_num}: {caption_text}</figcaption>'
     content = re.sub(r'\\caption\{([^}]*)\}', replace_caption, content)
 
     # Strip \\\\ (LaTeX line breaks) that leaked outside tabular
@@ -966,6 +972,8 @@ def process_content(content, base_dir, repo_root=None):
     content = content.replace('\\\\_', '_')
     # Fix remaining \\_ -> _ (double-backslash-underscore)
     content = content.replace('\\\_', '_')
+    # Fix remaining \_ -> _ (single backslash-underscore)
+    content = content.replace('\\_', '_')
 
     # Math symbols - map to HTML entities
     content = content.replace('\\ast', chr(8727))
@@ -974,7 +982,9 @@ def process_content(content, base_dir, repo_root=None):
     content = content.replace('\\le', chr(8804))
     content = content.replace('\\lvert', '|')
     content = content.replace('\\rvert', '|')
-    content = content.replace('\\textbackslash', chr(8249))
+    content = content.replace('\\textbackslash', '\\')
+    # Remove space after backslash in paths (textbackslash often has space in tex)
+    content = content.replace('\\ ', '\\')
     content = content.replace('\\textgreater', '&gt;')
     content = content.replace('\\times', chr(215))
     content = content.replace('\\space', ' ')
@@ -1264,10 +1274,10 @@ def generate_toc(content):
     def render_tree(node):
         result = ''
         for child in node['children']:
-            result += '<li><a href="#' + child['anchor'] + '">' + escape(child['text']) + '</a>'
+            result += '<li>\n<a href="#' + child['anchor'] + '">' + escape(child['text']) + '</a>\n'
             if child['children']:
-                result += '<ul>' + render_tree(child) + '</ul>'
-            result += '</li>'
+                result += '<ul>\n' + render_tree(child) + '</ul>\n'
+            result += '</li>\n'
         return result
 
     toc_html = '<div class="sidebar">\n<h3>Table of Contents</h3>\n<ul class="toc">\n'
@@ -1386,12 +1396,17 @@ body {
 }
 
 #content ul, #content ol {
-    list-style: none;
+    list-style: disc;
     margin: 0.5em 0 1em 2em;
+    padding-left: 2em;
+}
+
+#content ol {
+    list-style: decimal;
 }
 
 #content li {
-    list-style: none;
+    list-style: inherit;
     margin-bottom: 0.3em;
 }
 
@@ -1430,6 +1445,14 @@ body {
     color: #666;
     font-style: italic;
     margin: -0.5em 0 1em;
+}
+
+#content figcaption, #content .caption {
+    text-align: center;
+    font-size: 0.9em;
+    color: #444;
+    margin: 0.5em 0 1em;
+    font-style: italic;
 }
 
 #content img {
