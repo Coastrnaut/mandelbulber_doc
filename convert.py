@@ -722,6 +722,9 @@ def process_content(content, base_dir, repo_root=None):
                     # Strip leading/trailing { and } from cell content
                     while cell.startswith('{') and cell.endswith('}'):
                         cell = cell[1:-1]
+                    # Preserve & as &amp; in cell content (handle both \& and &)
+                    cell = cell.replace('\&', '&amp;')
+                    cell = cell.replace('&', '&amp;')
                     row_cells.append(f'<td>{cell}</td>')
                 rows.append(f'<tr>{"".join(row_cells)}</tr>')
             return f'<table class="table"><tbody>{"".join(rows)}</tbody></table>'
@@ -1534,7 +1537,6 @@ window.MathJax = {
 <button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open'); document.getElementById('content').classList.toggle('sidebar-open'); this.classList.toggle('shifted');">☰ TOC</button>
 TOC_PLACEHOLDER
 <div id="content">
-<h1>TITLE_PLACEHOLDER</h1>
 CONTENT_PLACEHOLDER
 </div>
 </body>
@@ -1569,15 +1571,9 @@ CONTENT_PLACEHOLDER
 
 
 def main():
-    args = parse_args()
-    source = Path(args.source).resolve()
-
-    # Resolve base_dir to repo root for correct \input{} resolution
-    # If source is a .tex file, use its parent; if it's a directory under mandelbulber2/, go up two levels
-    if source.is_file():
-        repo_root = str(source.parent)
-    else:
-        repo_root = str(source.parent.parent)
+    # Run from script directory - no arguments needed
+    script_dir = Path(__file__).resolve().parent
+    repo_root = str(script_dir)
 
     # Copy CSS to repo root (skip if already there)
     css_src = Path("css/style.css")
