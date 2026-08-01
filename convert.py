@@ -1096,10 +1096,13 @@ def process_content(content, base_dir, repo_root=None):
         
         # If entering, inside, or exiting a block element, don't wrap in <p>
         if block_depth > 0 or old_depth > 0 or pre_opens or pre_closes or table_opens or table_closes:
-            paragraph_buffer = []
+            if old_depth == 0 and (pre_opens or table_opens):
+                flush_paragraph()  # flush before entering block
+            else:
+                paragraph_buffer = []
             result.append(line)
             continue
-        
+
         # Skip lines that are already HTML block elements
         if re.match(r'^<(h[1-6]|ul|ol|li|table|tr|td|th|div|hr|pre|img|p|span|figcaption|br)', stripped, re.IGNORECASE):
             flush_paragraph()
@@ -1158,7 +1161,10 @@ def process_content(content, base_dir, repo_root=None):
         block_depth = max(0, block_depth)
 
         if block_depth > 0 or old_depth > 0 or pre_opens or table_opens or pre_closes or table_closes:
-            paragraph_buffer = []
+            if old_depth == 0 and (pre_opens or table_opens):
+                flush_paragraph()  # flush before entering block
+            else:
+                paragraph_buffer = []
             result.append(line)
             continue
 
