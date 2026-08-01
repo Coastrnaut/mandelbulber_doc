@@ -73,6 +73,9 @@ def resolve_input(path, base_dir, repo_root=None):
     content = re.sub(include_pattern, replace_include, content)
     # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
     
+    # Convert [text] to <strong>text</strong> (remove brackets, make bold)
+    content = re.sub(r'\[([^\]]+)\]', r'<strong></strong>', content)
+
     return content
 
 
@@ -205,7 +208,7 @@ def process_command(cmd_match):
         _figure_counter[0] = 0  # Reset figure counter for new section
         sec_num = f"{_section_counter[0]}"
         rid = sec_num.replace('.', '-')
-        return f"<h1 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h1>"
+        return f"<h1 id='{rid}'>{sec_num}. {_process_heading_text(args)}</h1>"
     elif cmd == "subsection":
         if not parts:
             return ""
@@ -213,14 +216,14 @@ def process_command(cmd_match):
         _subsubsection_counter[0] = 0
         sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}"
         rid = sec_num.replace('.', '-')
-        return f"<h2 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h2>"
+        return f"<h2 id='{rid}'>{sec_num}. {_process_heading_text(args)}</h2>"
     elif cmd == "subsubsection":
         if not parts:
             return ""
         _subsubsection_counter[0] += 1
         sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}"
         rid = sec_num.replace('.', '-')
-        return f"<h3 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h3>"
+        return f"<h3 id='{rid}'>{sec_num}. {_process_heading_text(args)}</h3>"
     elif cmd == "paragraph":
         if not parts:
             return ""
@@ -741,7 +744,10 @@ def process_content(content, base_dir, repo_root=None):
                     cell = cell.replace('&', '&amp;')
                     row_cells.append(f'<td>{cell}</td>')
                 rows.append(f'<tr>{"".join(row_cells)}</tr>')
-            return f'<table class="table"><tbody>{"".join(rows)}</tbody></table>'
+            table_html = f'<table class="table"><tbody>{"".join(rows)}</tbody></table>'
+            # Strip leading &amp; from cells (leaked cell separator)
+            table_html = re.sub(r'<td>\\s*&amp;\\s*', '<td>', table_html)
+            return table_html
         elif env_name == "itemize":
             items = []
             current_item = None
@@ -1265,8 +1271,10 @@ def process_content(content, base_dir, repo_root=None):
     # Remove [fontsize=] from verbatim blocks
     content = re.sub(r'\[fontsize=\]', '', content)
     content = content.replace('amp;', '&amp;')
+    # Strip leading &amp; from tabular cells (leaked cell separator)
+    content = re.sub(r'<td>\s*&amp;\s*', '<td>', content)
 
-    # Pair images with captions - section-aware numbering
+    # Pair images with captions - section-aware, single pass per section
     sections = re.split(r'(<h1[^>]*>.*?</h1>)', content)
     paired = []
     sec_num = 1
@@ -1277,14 +1285,23 @@ def process_content(content, base_dir, repo_root=None):
             _figure_counter[0] = 0
             sec_num = int(h1_match.group(1))
         else:
-            def pair_img(m, _sec=sec_num):
-                _figure_counter[0] += 1
-                fn = f"{_sec}.{_figure_counter[0]}"
+            # Only pair images that have actual caption text
+            def try_pair(m, _sec=sec_num):
                 img = m.group(1)
-                cap = m.group(2).strip()
-                return f'<figure class="figure">{img}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure>'
-            part = re.sub(r'(<img[^>]+/>)\s*<p>([^<]*)</p>', pair_img, part)
-            part = re.sub(r'(<img[^>]+/>)\s*([^<]*?)\s*</li>', lambda m, p=pair_img: p(m) + '</li>', part)
+                cap = (m.group(2) or m.group(3) or '').strip()
+                if cap:
+                    _figure_counter[0] += 1
+                    fn = f"{_sec}.{_figure_counter[0]}"
+                    return f'<figure class="figure">{img}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure>' + ('</li>' if m.group(3) else '')
+                else:
+                    # No caption - just return the image as-is
+                    return img + ('</li>' if m.group(3) else '')
+            # Match <img> followed by either <p>caption</p> or bare caption before </li>
+            part = re.sub(
+                r'(<img[^>]+/>)\s*(?:<p>([^<]*)</p>|([^<]*?)\s*</li>)',
+                try_pair,
+                part
+            )
             paired.append(part)
     content = ''.join(paired)
 
@@ -1438,6 +1455,19 @@ body {
 }
 
 #content h1 { font-size: 1.8em; border-bottom: 2px solid #eee; padding-bottom: 0.3em; text-align: center; }
+
+/* Title page styling */
+.titlepage strong {
+    font-size: 2.5em;
+    display: block;
+    text-align: center;
+}
+.titlepage p {
+    text-align: center;
+}
+.titlepage p strong {
+    font-size: 2em;
+}
 #content h2 { font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
 #content h3 { font-size: 1.3em; }
 #content h4 { font-size: 1.1em; }
