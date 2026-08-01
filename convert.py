@@ -202,6 +202,7 @@ def process_command(cmd_match):
         _section_counter[0] += 1
         _subsection_counter[0] = 0
         _subsubsection_counter[0] = 0
+        _figure_counter[0] = 0  # Reset figure counter for new section
         sec_num = f"{_section_counter[0]}"
         rid = sec_num.replace('.', '-')
         return f"<h1 id='{rid}'>{sec_num}. {_process_heading_text(parts[0])}</h1>"
@@ -661,7 +662,10 @@ def process_content(content, base_dir, repo_root=None):
 
     # Restore protected verbatim environments
     for key, body in _verbatim_registry.items():
-        content = content.replace(key, '<pre class="verbatim">' + escape(body) + '</pre>')
+        verbatim_html = '<pre class="verbatim">' + escape(body) + '</pre>'
+        # Remove [fontsize=] artifacts that leak from \fontsize{} macros
+        verbatim_html = re.sub(r'\[fontsize=\]', '', verbatim_html)
+        content = content.replace(key, verbatim_html)
     
     # Process environments
     env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?(?:\{(?:(?:[^{}]*\{[^{}]*\})*[^{}]*)\})?(.*?)\\end\{\1\}'
@@ -669,7 +673,9 @@ def process_content(content, base_dir, repo_root=None):
         env_name = m.group(1)
         body = m.group(2)
         if env_name == "verbatim":
-            return f'<pre class="verbatim">{escape(body)}</pre>'
+            cleaned = escape(body)
+            cleaned = re.sub(r'\[fontsize=\]', '', cleaned)
+            return f'<pre class="verbatim">{cleaned}</pre>'
         elif env_name == "figure":
             return f'<figure class="figure">{body}</figure>'
         elif env_name == "table":
@@ -724,6 +730,12 @@ def process_content(content, base_dir, repo_root=None):
                     # Strip leading/trailing { and } from cell content
                     while cell.startswith('{') and cell.endswith('}'):
                         cell = cell[1:-1]
+                    # Strip leading &amp; that leaked from cell separator
+                    while cell.startswith('&amp;'):
+                        cell = cell[5:]
+                    while cell.startswith('&'):
+                        cell = cell[1:]
+                    cell = cell.strip()
                     # Preserve & as &amp; in cell content (handle both \& and &)
                     cell = cell.replace('\&', '&amp;')
                     cell = cell.replace('&', '&amp;')
@@ -1250,25 +1262,31 @@ def process_content(content, base_dir, repo_root=None):
 
 
     # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
+    # Remove [fontsize=] from verbatim blocks
+    content = re.sub(r'\[fontsize=\]', '', content)
     content = content.replace('amp;', '&amp;')
 
-    # Pair images with their following caption paragraphs
-    # Pattern: <img ... /><p>Caption text</p> -> <figure><img ... /><figcaption>Figure X.Y: Caption</figcaption></figure>
-    def pair_image_caption(m):
-        global _figure_counter
-        _figure_counter[0] += 1
-        sec = _section_counter[0]
-        fig_num = f"{sec}.{_figure_counter[0]}"
-        img_tag = m.group(1)
-        caption = m.group(2)
-        return f'<figure class="figure">{img_tag}<figcaption class="caption">Figure {fig_num}: {caption}</figcaption></figure>'
-    
-    # Match <img ... /> followed by <p>...</p> (the caption paragraph)
-    content = re.sub(
-        r'(<img[^>]+/>)\s*<p>([^<]*)</p>',
-        pair_image_caption,
-        content
-    )
+    # Pair images with captions - section-aware numbering
+    sections = re.split(r'(<h1[^>]*>.*?</h1>)', content)
+    paired = []
+    sec_num = 1
+    for part in sections:
+        h1_match = re.match(r'<h1[^>]*>\s*(\d+)', part)
+        if h1_match:
+            paired.append(part)
+            _figure_counter[0] = 0
+            sec_num = int(h1_match.group(1))
+        else:
+            def pair_img(m, _sec=sec_num):
+                _figure_counter[0] += 1
+                fn = f"{_sec}.{_figure_counter[0]}"
+                img = m.group(1)
+                cap = m.group(2).strip()
+                return f'<figure class="figure">{img}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure>'
+            part = re.sub(r'(<img[^>]+/>)\s*<p>([^<]*)</p>', pair_img, part)
+            part = re.sub(r'(<img[^>]+/>)\s*([^<]*?)\s*</li>', lambda m, p=pair_img: p(m) + '</li>', part)
+            paired.append(part)
+    content = ''.join(paired)
 
     return content
 
