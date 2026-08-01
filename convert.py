@@ -74,7 +74,7 @@ def resolve_input(path, base_dir, repo_root=None):
     # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
     
     # Convert [text] to <strong>text</strong> (remove brackets, make bold)
-    content = re.sub(r'\[([^\]]+)\]', r'<strong></strong>', content)
+    content = re.sub(r'\[([^\]]+)\]', lambda m: f'<strong>{m.group(1)}</strong>', content)
 
     return content
 
@@ -1300,6 +1300,20 @@ def process_content(content, base_dir, repo_root=None):
             part = re.sub(
                 r'(<img[^>]+/>)\s*(?:<p>([^<]*)</p>|([^<]*?)\s*</li>)',
                 try_pair,
+                part
+            )
+            # Also match bare caption text after <img> that's followed by more paragraph text
+            def try_pair_bare(m, _sec=sec_num):
+                cap = (m.group(2) or '').strip()
+                if cap:
+                    _figure_counter[0] += 1
+                    fn = f"{_sec}.{_figure_counter[0]}"
+                    return f'<figure class="figure">{m.group(1)}<figcaption class="caption">Figure {fn}: {cap}</figcaption></figure> {m.group(3)}'
+                else:
+                    return m.group(0)
+            part = re.sub(
+                r'(<img[^>]+/>)\s*([^<]+?)\s{2,}([^<])',
+                try_pair_bare,
                 part
             )
             paired.append(part)
