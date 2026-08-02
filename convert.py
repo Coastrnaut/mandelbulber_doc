@@ -897,6 +897,71 @@ def process_content(content, base_dir, repo_root=None):
             return body
         elif env_name == "description":
             return body
+        elif env_name == "tabular":
+            # Convert tabular content: & -> cell delimiter, \\ -> row delimiter
+            # Only process if content actually has & cell delimiters
+            if '&' not in body:
+                return f'<div class="tabular">{body}</div>'
+            lines = body.split('\\\\')
+            rows = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                # Skip column spec lines (first line usually has {l|c|c} etc.)
+                if re.match(r'^\s*\{[^}]*\}\s*$', line):
+                    continue
+                # Also match unbraced column specs like l|c|c or r|p{11cm}
+                stripped = line.strip()
+                if stripped:
+                    depth = 0
+                    is_col_spec = True
+                    for ch in stripped:
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                        elif ch not in 'lrcLRCpP|.1234567890 ':
+                            is_col_spec = False
+                            break
+                    if depth == 0 and is_col_spec:
+                        continue
+                # Match braced column specs with nested braces
+                if line.strip().startswith('{'):
+                    depth = 0
+                    valid_col_spec = True
+                    for ch in line.strip():
+                        if ch == '{':
+                            depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                        elif ch not in 'lrcLRCpP|.1234567890 ':
+                            valid_col_spec = False
+                            break
+                    if depth == 0 and valid_col_spec:
+                        continue
+                cells = line.split('&')
+                row_cells = []
+                for cell in cells:
+                    cell = cell.strip()
+                    # Strip leading/trailing { and } from cell content
+                    while cell.startswith('{') and cell.endswith('}'):
+                        cell = cell[1:-1]
+                    # Strip leading &amp; that leaked from cell separator
+                    while cell.startswith('&amp;'):
+                        cell = cell[5:]
+                    while cell.startswith('&'):
+                        cell = cell[1:]
+                    cell = cell.strip()
+                    # Preserve & as &amp; in cell content
+                    cell = cell.replace('\&', '&amp;')
+                    cell = cell.replace('&', '&amp;')
+                    row_cells.append(f'<td>{cell}</td>')
+                rows.append(f'<tr>{"".join(row_cells)}</tr>')
+            if rows:
+                return f'<table class="table"><tbody>{"".join(rows)}</tbody></table>'
+            return f'<div class="tabular">{body}</div>'
+
         else:
             return f'<div class="{env_name}">{body}</div>'
     # Process environments iteratively to handle nesting (center > tabular)
@@ -1104,6 +1169,11 @@ def process_content(content, base_dir, repo_root=None):
             new_parts.append(number_captions_in_section(part, sec_num))
     content = ''.join(new_parts)
 
+
+    # Convert \\\\ (LaTeX line breaks) to <br> BEFORE stripping - this preserves row breaks
+    # in tabular environments where the tabular handler is dead code
+    content = re.sub(r'\\\\(?=$|\s)', '<br>', content, flags=re.MULTILINE)
+
     # Strip \\\\ (LaTeX line breaks) that leaked outside tabular
     content = re.sub(r'\\\\\\\\s*', '', content)
     
@@ -1164,6 +1234,35 @@ def process_content(content, base_dir, repo_root=None):
     # Also strip orphaned baselinestretch values at content start
     content = re.sub(r'^\s*\d+\.\d+\s*', '', content)
     
+
+
+    # Strip stray & (LaTeX tabular column separators) that leaked outside tabular environments
+    # These appear in titlepage divs where & is used but not inside \begin{tabular}
+    # First, fix double-escaped &&amp; -> remove the extra &
+    content = content.replace('&&amp;', '&amp;')
+    # Then strip standalone & that appear between content and links (column separators)
+    # Pattern: & followed by <a or & preceded by </a> (column delimiters)
+    content = re.sub(r'</a>\s*&\s*<span', '</a> <span', content)
+    content = re.sub(r'</a>\s*&\s*<a', '</a> <a', content)
+    content = re.sub(r'<span[^>]*>\s*&\s*<a', '<span> <a', content)
+    # Strip any remaining standalone & between text and links
+    content = re.sub(r'(?<=</a>)\s*&\s*(?=<span)', '', content)
+    content = re.sub(r'(?<=</a>)\s*&\s*(?=<a)', '', content)
+    content = re.sub(r'(?<=</a>)\s*&\s*(?=\s*$)', '', content, flags=re.MULTILINE)
+    # Strip leading & from paragraphs (leftover column separator)
+    content = re.sub(r'<p>\s*&\s*(&amp;)?\s*', '<p>', content)
+    content = re.sub(r'<p>\s*(&amp;)\s*', '<p>', content)
+    # Strip trailing & from paragraphs
+    content = re.sub(r'\s*&\s*</p>', '</p>', content)
+    content = re.sub(r'\s*(&amp;)\s*</p>', '</p>', content)
+    # Clean up &&amp; -> just the email/link content
+    content = re.sub(r'\s*&&amp;\s*', ' ', content)
+    content = re.sub(r'\s*&&\s*', ' ', content)
+    content = re.sub(r'\s*&\s*<a', ' <a', content)
+    content = re.sub(r'</a>\s*&\s*', '</a> ', content)
+    content = re.sub(r'(?<=:</span>)\s*&\s*', ' ', content)
+    content = re.sub(r'(?<=:</span>)\s*&&amp;\s*', ' ', content)
+    content = re.sub(r'(?<=:</span>)\s*&&\s*', ' ', content)
 
     # Strip trailing \\ (LaTeX line breaks) that leaked outside tabular
     content = re.sub(r'\\\\\s*(?=\n|<)', '', content)
@@ -1664,6 +1763,24 @@ body {
     #content {
         padding: 2em 1.2em;
     }
+}
+
+
+/* Title page table styling - vertical separator */
+.titlepage table.table {
+    border-collapse: collapse;
+}
+.titlepage table.table td {
+    padding: 0.15em 0.5em;
+    vertical-align: top;
+}
+.titlepage table.table td:first-child {
+    border-right: 1px solid #000;
+    padding-right: 0.8em;
+    white-space: nowrap;
+}
+.titlepage table.table td:last-child {
+    padding-left: 0.8em;
 }
 
 </style>
