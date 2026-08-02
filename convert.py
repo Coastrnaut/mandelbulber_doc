@@ -1041,6 +1041,26 @@ def process_content(content, base_dir, repo_root=None):
     content = re.sub(r'\\vfill\s*', '', content)
     # Process commands iteratively until stable (handles nested \textbf{\emph{text}})
     # Use brace-aware regex that handles one level of nesting
+
+
+
+    # Pre-process \\textcolor with nested braces (process from inside out)
+    # This handles cases like \\textcolor{yellow}{\\textcolor{black}{Yellow}}
+    # which the generic cmd_pattern cannot handle due to nested braces
+    def process_textcolor(content):
+        max_iter = 50
+        while max_iter > 0:
+            max_iter -= 1
+            m = re.search(r'\\textcolor\{([^{}]+)\}\{([^{}]*)\}', content)
+            if not m:
+                break
+            color = m.group(1)
+            text = m.group(2)
+            replacement = f'<span style="color:{color}">{text}</span>'
+            content = content[:m.start()] + replacement + content[m.end():]
+        return content
+    content = process_textcolor(content)
+
     cmd_pattern = r'\\([a-zA-Z]+)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
     prev = None
     iteration = 0
@@ -1050,6 +1070,10 @@ def process_content(content, base_dir, repo_root=None):
         iteration += 1
     if iteration >= 20:
         print("Warning: command processing hit 20 iterations, some nesting may remain")
+
+    # Convert LaTeX -- (en-dash) and --- (em-dash) to HTML equivalents
+    content = content.replace(' -- ', ' – ')
+    content = content.replace('---', '—')
 
     # Clean up unprocessed \href second args: {text} left after </a> when source has \href{URL} {text} with space
     content = re.sub(r'</a>\s*\{[^}]*\}', r'</a>', content)
