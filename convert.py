@@ -362,17 +362,20 @@ def process_image_macro(content, repo_root=None):
     }
 
     # Process custom \simpleImageWithCaption{Type}{path} macros
-    custom_pattern = r'\\simpleImageWithCaption(75Width|FullWidth|HalfWidth|SmallWidth|ThirdWidth)\{([^}]+)\}'
+    custom_pattern = r'\\simpleImageWithCaption(75Width|FullWidth|HalfWidth|SmallWidth|ThirdWidth)\{([^}]+)\}\s*\{([^}]+)\}'
     def replace_custom_image(m):
         suffix = m.group(1)
         path = m.group(2)
+        caption = m.group(3) if m.group(3) else ""
         width = width_map.get(suffix, '')
         # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
         html_path = path.replace("\\", "/")
-        if width:
-            return f'<img src="{html_path}" alt="{path}" style="max-width:{width}; height:auto; display:block; margin:1em auto;" />'
-        else:
-            return f'<img src="{html_path}" alt="{path}" style="max-width:100%; height:auto; display:block; margin:1em auto;" />'
+        img_style = f"max-width:{width}; height:auto; display:block; margin:1em auto;" if width else "max-width:100%; height:auto; display:block; margin:1em auto;"
+        img_html = f'<img src="{html_path}" alt="{path}" style="{img_style}" />'
+        if caption:
+            return f'<figure class="manual-figure">{img_html}<figcaption class="figcaption">{caption}</figcaption></figure>'
+        return img_html
+
     content = re.sub(custom_pattern, replace_custom_image, content)
 
     # Process standard \includegraphics[opts]{path}
@@ -751,10 +754,17 @@ def process_content(content, base_dir, repo_root=None):
             cleaned = re.sub(r'\[fontsize=\]', '', cleaned)
             return f'<pre class="verbatim">{cleaned}</pre>'
         elif env_name == "figure":
-            return f'<figure class="figure">{body}</figure>'
-        elif env_name == "table":
-            return f'<table class="table">{body}</table>'
-        elif env_name == "tabular":
+            # Process figure environments (basic)
+            # Strip caption from figure body - processed globally
+            # Preserve \caption{} for global caption processing
+            # Extract \caption{} and place inside figure properly
+            if caption_match:
+                # Remove caption from body to prevent double-processing
+                clean_body = re.sub(r'\\\\caption\{[^}]*\}', '', body)
+                # Caption will be processed by global handler - just return figure with clean body
+                return f'<figure class="figure">{clean_body}</figure>'
+            else:
+                return f'<figure class="figure">{body}</figure>'
             # Convert tabular content: & -> cell delimiter, \\ -> row delimiter
             # Only process if content actually has & cell delimiters
             if '&' not in body:
@@ -1243,67 +1253,6 @@ def process_content(content, base_dir, repo_root=None):
     content = '\n'.join(result)
 
     # =====================================================================
-    # WRAP PARAGRAPHS - wrap unwrapped text in <p> tags
-    # =====================================================================
-    wrap_lines = content.split('\n')
-    result = []
-    paragraph_buffer = []
-    block_depth = 0
-
-    def flush_paragraph():
-        nonlocal paragraph_buffer
-        if paragraph_buffer:
-            text = ' '.join(t.strip() for t in paragraph_buffer if t.strip())
-            if text:
-                result.append('<p>' + text + '</p>')
-            paragraph_buffer = []
-
-    for line in wrap_lines:
-        stripped = line.strip()
-        if not stripped:
-            if block_depth == 0:
-                flush_paragraph()
-            else:
-                paragraph_buffer = []
-            continue
-
-        pre_opens = len(re.findall(r'<pre[^>]*>', stripped, re.IGNORECASE))
-        pre_closes = len(re.findall(r'</pre>', stripped, re.IGNORECASE))
-        table_opens = len(re.findall(r'<table[^>]*>', stripped, re.IGNORECASE))
-        table_closes = len(re.findall(r'</table>', stripped, re.IGNORECASE))
-
-        old_depth = block_depth
-        block_depth += pre_opens + table_opens - pre_closes - table_closes
-        block_depth = max(0, block_depth)
-
-        if block_depth > 0 or old_depth > 0 or pre_opens or table_opens or pre_closes or table_closes:
-            if old_depth == 0 and (pre_opens or table_opens):
-                flush_paragraph()  # flush before entering block
-            else:
-                paragraph_buffer = []
-            result.append(line)
-            continue
-
-        if re.match(r'^<(h[1-6]|ul|ol|li|table|tr|td|th|div|hr|pre|img|p|span|figcaption|br)', stripped, re.IGNORECASE):
-            flush_paragraph()
-            result.append(line)
-            continue
-        if re.match(r'^</?(h[1-6]|ul|ol|li|table|tr|td|th|div|pre|p|span|figcaption|br)[^>]*>$', stripped, re.IGNORECASE):
-            flush_paragraph()
-            result.append(line)
-            continue
-        if re.match(r'^<[^>]+>$', stripped, re.IGNORECASE):
-            flush_paragraph()
-            result.append(line)
-            continue
-
-        if block_depth == 0:
-            paragraph_buffer.append(stripped)
-        else:
-            result.append(line)
-
-    flush_paragraph()
-    content = '\n'.join(result)
 
     # Cleanup: remove stray <p> tags inside <pre> blocks
     def remove_p_in_pre(match):
