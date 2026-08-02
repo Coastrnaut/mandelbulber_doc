@@ -802,6 +802,31 @@ def process_content(content, base_dir, repo_root=None):
         elif env_name == "minipage":
             # \begin{minipage}[b]{0.5\linewidth} — strip optional [arg] and {arg}
             return body
+        elif env_name == "description":
+            items = []
+            current_item = None
+            for line in body.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("\\item"):
+                    if current_item is not None:
+                        items.append(f"<li>{current_item}</li>")
+                    rest = stripped[5:]
+                    # Handle \item [label] - text
+                    if rest.startswith(' '):
+                        rest = rest[1:]
+                    if rest.startswith('['):
+                        bracket_end = rest.find(']')
+                        if bracket_end != -1:
+                            label = rest[1:bracket_end]
+                            desc_text = rest[bracket_end+1:].strip()
+                            current_item = f"<strong>{label}</strong> {desc_text}"
+                            continue
+                    current_item = rest.strip()
+                elif current_item is not None and stripped:
+                    current_item += f" {stripped}"
+            if current_item is not None:
+                items.append(f"<li>{current_item}</li>")
+            return f"<ul>{chr(10).join(items)}</ul>"
         else:
             return f'<div class="{env_name}">{body}</div>'
     # Process environments iteratively to handle nesting (center > tabular)
