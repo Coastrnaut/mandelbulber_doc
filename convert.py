@@ -373,7 +373,7 @@ def process_image_macro(content, repo_root=None):
         img_style = f"max-width:{width}; height:auto; display:block; margin:1em auto;" if width else "max-width:100%; height:auto; display:block; margin:1em auto;"
         img_html = f'<img src="{html_path}" alt="{path}" style="{img_style}" />'
         if caption:
-            return f'<figure class="manual-figure">{img_html}<figcaption class="figcaption">{caption}</figcaption></figure>'
+            return f'<figure class="manual-figure">{img_html}<figcaption class="figcaption">Figure: {caption}</figcaption></figure>'
         return img_html
 
     content = re.sub(custom_pattern, replace_custom_image, content)
