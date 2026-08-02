@@ -671,6 +671,84 @@ def process_content(content, base_dir, repo_root=None):
         content = content.replace(key, verbatim_html)
     
     # Process environments
+    # Pre-process \item commands inside description environments
+    # This runs BEFORE env_pattern to handle nested descriptions
+    def process_description_items(m):
+        body = m.group(1)
+        items = []
+        current_item = None
+        depth = 0
+        nested_buf = []
+        for line in body.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("\begin{description}"):
+                if depth == 0:
+                    nested_buf = []
+                depth += 1
+                continue
+            if stripped.startswith("\end{description}"):
+                depth -= 1
+                if depth == 0:
+                    if current_item is not None:
+                        items.append(f"<li>{current_item}</li>")
+                        current_item = None
+                    nested_body = "\n".join(nested_buf)
+                    nested_items = []
+                    nested_current = None
+                    for nline in nested_body.split("\n"):
+                        nstripped = nline.strip()
+                        if nstripped.startswith("\item"):
+                            if nested_current is not None:
+                                nested_items.append(f"<li>{nested_current}</li>")
+                            nrest = nstripped[5:]
+                            if nrest.startswith(' '):
+                                nrest = nrest[1:]
+                            if nrest.startswith('['):
+                                nbe = nrest.find(']')
+                                if nbe != -1:
+                                    nlabel = nrest[1:nbe]
+                                    ndesc = nrest[nbe+1:].strip()
+                                    nested_current = f"<strong>{nlabel}</strong> {ndesc}"
+                                    continue
+                            nested_current = nrest.strip()
+                        elif nested_current is not None and nstripped:
+                            nested_current += f" {nstripped}"
+                    if nested_current is not None:
+                        nested_items.append(f"<li>{nested_current}</li>")
+                    items.append(f"<ul>{chr(10).join(nested_items)}</ul>")
+                    nested_buf = []
+                continue
+            if depth > 0:
+                nested_buf.append(stripped)
+                continue
+            if stripped.startswith("\item"):
+                if current_item is not None:
+                    items.append(f"<li>{current_item}</li>")
+                rest = stripped[5:]
+                if rest.startswith(' '):
+                    rest = rest[1:]
+                if rest.startswith('['):
+                    bracket_end = rest.find(']')
+                    if bracket_end != -1:
+                        label = rest[1:bracket_end]
+                        desc_text = rest[bracket_end+1:].strip()
+                        current_item = f"<strong>{label}</strong> {desc_text}"
+                        continue
+                current_item = rest.strip()
+            elif current_item is not None and stripped:
+                current_item += f" {stripped}"
+        if current_item is not None:
+            items.append(f"<li>{current_item}</li>")
+        return "\n".join(items)
+    
+    # Process description environments with nested support
+    desc_pattern = r"\\begin\{description\}(.*?)\\end\{description\}"
+    content = re.sub(desc_pattern, process_description_items, content, flags=re.DOTALL)
+    # Remove the processed description env markers
+    content = re.sub(r"\\begin\{description\}", "", content)
+    content = re.sub(r"\\end\{description\}", "", content)
+
+
     env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?(?:\{(?:(?:[^{}]*\{[^{}]*\})*[^{}]*)\})?(.*?)\\end\{\1\}'
     def replace_env(m):
         env_name = m.group(1)
@@ -803,30 +881,7 @@ def process_content(content, base_dir, repo_root=None):
             # \begin{minipage}[b]{0.5\linewidth} — strip optional [arg] and {arg}
             return body
         elif env_name == "description":
-            items = []
-            current_item = None
-            for line in body.split("\n"):
-                stripped = line.strip()
-                if stripped.startswith("\\item"):
-                    if current_item is not None:
-                        items.append(f"<li>{current_item}</li>")
-                    rest = stripped[5:]
-                    # Handle \item [label] - text
-                    if rest.startswith(' '):
-                        rest = rest[1:]
-                    if rest.startswith('['):
-                        bracket_end = rest.find(']')
-                        if bracket_end != -1:
-                            label = rest[1:bracket_end]
-                            desc_text = rest[bracket_end+1:].strip()
-                            current_item = f"<strong>{label}</strong> {desc_text}"
-                            continue
-                    current_item = rest.strip()
-                elif current_item is not None and stripped:
-                    current_item += f" {stripped}"
-            if current_item is not None:
-                items.append(f"<li>{current_item}</li>")
-            return f"<ul>{chr(10).join(items)}</ul>"
+            return body
         else:
             return f'<div class="{env_name}">{body}</div>'
     # Process environments iteratively to handle nesting (center > tabular)
