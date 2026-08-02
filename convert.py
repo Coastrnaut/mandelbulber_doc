@@ -5,7 +5,6 @@ Converts .tex source files to a single-page HTML document with collapsible sideb
 """
 
 import os
-import sys
 import re
 import shutil
 import argparse
@@ -352,6 +351,7 @@ def process_command(cmd_match):
 
 def process_image_macro(content, repo_root=None):
     """Process \\includegraphics[opts]{path} and custom \\simpleImageWithCaption{Type}{path}."""
+
     # Map custom macro suffixes to width percentages
     width_map = {
         'FullWidth': '',
@@ -388,6 +388,7 @@ def process_image_macro(content, repo_root=None):
         fig2 = f'<figure class="manual-figure"><img src="{h2}" alt="{path2}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap2}</figcaption></figure>'
         return f'<div style="display:flex; flex-wrap:wrap;">{fig1}{fig2}</div>'
     content = re.sub(twoimg_pattern, replace_two_images, content, flags=re.DOTALL)
+
 
     # Process standard \includegraphics[opts]{path}
     pattern = r'\\includegraphics(\[[^\]]*\])?\{([^}]+)\}'
