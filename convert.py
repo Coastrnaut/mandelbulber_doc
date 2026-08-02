@@ -74,7 +74,7 @@ def resolve_input(path, base_dir, repo_root=None):
     # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
     
     # Convert [text] to <strong>text</strong> (remove brackets, make bold)
-    content = re.sub(r'\[([^\]]+)\]', lambda m: f'<strong>{m.group(1)}</strong>', content)
+
 
     return content
 
@@ -1317,6 +1317,12 @@ def process_content(content, base_dir, repo_root=None):
             paired.append(part)
     content = ''.join(paired)
 
+
+    # Convert [text] to <strong>text</strong> - skip <pre> blocks
+    def convert_brackets(text):
+        return re.sub(r'\[([^\]]+)\]', lambda m: f'<strong>{m.group(1)}</strong>', text)
+    parts = re.split(r'(<pre[^>]*>.*?</pre>)', content, flags=re.DOTALL)
+    content = ''.join(convert_brackets(p) if not p.startswith('<pre') else p for p in parts)
     return content
 
 
