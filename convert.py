@@ -384,9 +384,9 @@ def process_image_macro(content, repo_root=None):
         path1, cap1, path2, cap2 = m.group(1), m.group(2), m.group(3), m.group(4)
         h1 = path1.replace("\\", "/")
         h2 = path2.replace("\\", "/")
-        fig1 = f'<figure class="manual-figure"><img src="{h1}" alt="{path1}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap1}</figcaption></figure>'
-        fig2 = f'<figure class="manual-figure"><img src="{h2}" alt="{path2}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap2}</figcaption></figure>'
-        return f'<div style="display:flex; flex-wrap:wrap;">{fig1}{fig2}</div>'
+        fig1 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h1}" alt="{path1}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap1}</figcaption></figure>'
+        fig2 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h2}" alt="{path2}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap2}</figcaption></figure>'
+        return f'<div style="display:flex; flex-direction:row; gap:1em; justify-content:center;">{fig1}{fig2}</div>'
     content = re.sub(twoimg_pattern, replace_two_images, content, flags=re.DOTALL)
 
 
