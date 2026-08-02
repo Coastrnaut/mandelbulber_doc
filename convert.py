@@ -373,7 +373,7 @@ def process_image_macro(content, repo_root=None):
         img_style = f"max-width:{width}; height:auto; display:block; margin:1em auto;" if width else "max-width:100%; height:auto; display:block; margin:1em auto;"
         img_html = f'<img src="{html_path}" alt="{path}" style="{img_style}" />'
         if caption:
-            return f'<figure class="manual-figure">{img_html}<figcaption class="figcaption">Figure: {caption}</figcaption></figure>'
+            return f'<figure class="manual-figure">{img_html}<figcaption class="figcaption">__FIGNUM__ {caption}</figcaption></figure>'
         return img_html
 
     content = re.sub(custom_pattern, replace_custom_image, content)
@@ -384,8 +384,8 @@ def process_image_macro(content, repo_root=None):
         path1, cap1, path2, cap2 = m.group(1), m.group(2), m.group(3), m.group(4)
         h1 = path1.replace("\\", "/")
         h2 = path2.replace("\\", "/")
-        fig1 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h1}" alt="{path1}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap1}</figcaption></figure>'
-        fig2 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h2}" alt="{path2}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">Figure: {cap2}</figcaption></figure>'
+        fig1 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h1}" alt="{path1}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">__FIGNUM__ {cap1}</figcaption></figure>'
+        fig2 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h2}" alt="{path2}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">__FIGNUM__ {cap2}</figcaption></figure>'
         return f'<div style="display:flex; flex-direction:row; gap:1em; justify-content:center;">{fig1}{fig2}</div>'
     content = re.sub(twoimg_pattern, replace_two_images, content, flags=re.DOTALL)
 
@@ -1074,15 +1074,35 @@ def process_content(content, base_dir, repo_root=None):
     # hline - table horizontal line -> <hr>
     content = re.sub(r'\\hline', '<hr>', content)
 
-    # Render \caption{...} as visible captions with numbering
-    def replace_caption(m):
+    # Number all captions in document order (both \caption{} and manual figcaps)
+    # Split by <h1> tags so each section gets its own figure counter
+    def number_captions_in_section(section_content, sec_num):
         global _figure_counter
-        _figure_counter[0] += 1
-        sec = _section_counter[0]
-        fig_num = f"{sec}.{_figure_counter[0]}"
-        caption_text = m.group(1)
-        return f'<figcaption class="caption">Figure {fig_num}: {caption_text}</figcaption>'
-    content = re.sub(r'\\caption\{([^}]*)\}', replace_caption, content)
+        fig_count = [0]
+        def repl(m):
+            fig_count[0] += 1
+            _figure_counter[0] += 1
+            fig_num = f"{sec_num}.{fig_count[0]}"
+            if m.group(1) is not None:
+                return f'<figcaption class="caption">Figure {fig_num}: {m.group(1)}</figcaption>'
+            else:
+                return f'<figcaption class="figcaption">Figure {fig_num}: {m.group(2)}</figcaption>'
+        return re.sub(r'\\caption\{([^}]*)\}|<figcaption class="figcaption">__FIGNUM__ ([^<]*)</figcaption>', repl, section_content)
+    # Split content into sections by <h1> tags
+    parts = re.split(r'(<h1[^>]*>.*?</h1>)', content)
+    # First part is before any <h1>
+    sec_num = 1
+    new_parts = []
+    for j, part in enumerate(parts):
+        if part.startswith('<h1'):
+            # Extract section number from h1
+            h1_m = re.search(r'>(\d+)\.\s', part)
+            if h1_m:
+                sec_num = int(h1_m.group(1))
+            new_parts.append(part)
+        else:
+            new_parts.append(number_captions_in_section(part, sec_num))
+    content = ''.join(new_parts)
 
     # Strip \\\\ (LaTeX line breaks) that leaked outside tabular
     content = re.sub(r'\\\\\\\\s*', '', content)
