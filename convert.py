@@ -73,8 +73,7 @@ def resolve_input(path, base_dir, repo_root=None):
     content = re.sub(include_pattern, replace_include, content)
     # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
     
-    # Convert [text] to <strong>text</strong> (remove brackets, make bold)
-
+    # Restore verbatim content AFTER paragraph wrapping
 
     return content
 
@@ -664,11 +663,6 @@ def process_content(content, base_dir, repo_root=None):
         content = re.sub(r'\\' + re.escape(key) + r'\s*', escaped_value, content)
 
     # Restore protected verbatim environments
-    for key, body in _verbatim_registry.items():
-        verbatim_html = '<pre class="verbatim">' + chr(10) + escape(body) + chr(10) + '</pre>'
-        # Remove [fontsize=] artifacts that leak from \fontsize{} macros
-        verbatim_html = re.sub(r'\[fontsize=\]', '', verbatim_html)
-        content = content.replace(key, verbatim_html)
             # Debug: check verbatim HTML newlines
     # Pre-process \item commands inside description environments
     # This runs BEFORE env_pattern to handle nested descriptions
@@ -1238,7 +1232,10 @@ def process_content(content, base_dir, repo_root=None):
             result.append(line)
             continue
         # This is text content - add to paragraph buffer
-        paragraph_buffer.append(stripped)
+        if block_depth == 0:
+            paragraph_buffer.append(stripped)
+        else:
+            result.append(line)
     
     # Flush any remaining paragraph
     flush_paragraph()
@@ -1300,7 +1297,10 @@ def process_content(content, base_dir, repo_root=None):
             result.append(line)
             continue
 
-        paragraph_buffer.append(stripped)
+        if block_depth == 0:
+            paragraph_buffer.append(stripped)
+        else:
+            result.append(line)
 
     flush_paragraph()
     content = '\n'.join(result)
@@ -1396,6 +1396,12 @@ def process_content(content, base_dir, repo_root=None):
             paired.append(part)
     content = ''.join(paired)
 
+
+    # Restore verbatim content AFTER paragraph wrapping
+    for key, body in _verbatim_registry.items():
+        verbatim_html = '<pre class="verbatim">' + chr(10) + escape(body) + chr(10) + '</pre>'
+        verbatim_html = re.sub(r'\[fontsize=\]', '', verbatim_html)
+        content = content.replace(key, verbatim_html)
 
     # Convert [text] to <strong>text</strong> - skip <pre> blocks
     def convert_brackets(text):
