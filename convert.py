@@ -872,13 +872,13 @@ def process_content(content, base_dir, repo_root=None):
                 if stripped.startswith("\\item"):
                     counter += 1
                     if current_item is not None:
-                        items.append(f"<li>{counter-1}. {current_item}</li>")
+                        items.append(f"<li>{current_item}</li>")
                     rest = stripped[5:]
                     current_item = rest.strip()
                 elif current_item is not None and stripped:
                     current_item += f" {stripped}"
             if current_item is not None:
-                items.append(f"<li>{counter}. {current_item}</li>")
+                items.append(f"<li>{current_item}</li>")
             return f"<ol>{chr(10).join(items)}</ol>"
         elif env_name == "quote":
             return f"<blockquote>{body}</blockquote>"
