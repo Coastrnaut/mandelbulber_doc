@@ -641,7 +641,7 @@ def process_content(content, base_dir, repo_root=None):
     # Extract verbatim environments BEFORE macro replacement to protect their content
     _verbatim_registry = {}
     _verbatim_counter = [0]
-    verbatim_pattern = r'\\begin\{verbatim\}(.*?)\\end\{verbatim\}'
+    verbatim_pattern = r'\\begin\{verbatim\}(?:\[[^\]]*\])?(.*?)\\end\{verbatim\}'
     def protect_verbatim(m):
         _verbatim_counter[0] += 1
         key = f'__VERBATIM_{_verbatim_counter[0]}__'
@@ -665,12 +665,11 @@ def process_content(content, base_dir, repo_root=None):
 
     # Restore protected verbatim environments
     for key, body in _verbatim_registry.items():
-        verbatim_html = '<pre class="verbatim">' + escape(body) + '</pre>'
+        verbatim_html = '<pre class="verbatim">' + chr(10) + escape(body) + chr(10) + '</pre>'
         # Remove [fontsize=] artifacts that leak from \fontsize{} macros
         verbatim_html = re.sub(r'\[fontsize=\]', '', verbatim_html)
         content = content.replace(key, verbatim_html)
-    
-    # Process environments
+            # Debug: check verbatim HTML newlines
     # Pre-process \item commands inside description environments
     # This runs BEFORE env_pattern to handle nested descriptions
     def process_description_items(m):
