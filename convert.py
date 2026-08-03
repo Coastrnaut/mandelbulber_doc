@@ -389,6 +389,22 @@ def process_image_macro(content, repo_root=None):
         return f'<div style="display:flex; flex-direction:row; gap:1em; justify-content:center;">{fig1}{fig2}</div>'
     content = re.sub(twoimg_pattern, replace_two_images, content, flags=re.DOTALL)
 
+    # Process \\threeImagesWithTwoCaptionsFullWidth{path1}{cap1}{lbl1}{path2}{cap2}{lbl2}{path3}{cap3}{lbl3}
+    threeimg_pattern = r'\\threeImagesWithTwoCaptionsFullWidth\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}'
+    def replace_three_images(m):
+        path1, cap1 = m.group(1), m.group(2)
+        path2, cap2 = m.group(3), m.group(4)
+        path3, cap3 = m.group(5), m.group(6)
+        h1 = path1.replace("\\", "/")
+        h2 = path2.replace("\\", "/")
+        h3 = path3.replace("\\", "/")
+        fig1 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h1}" alt="{path1}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">__FIGNUM__ {cap1}</figcaption></figure>'
+        fig2 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h2}" alt="{path2}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">__FIGNUM__ {cap2}</figcaption></figure>'
+        fig3 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h3}" alt="{path3}" style="max-width:48%; height:auto; display:inline-block; margin:1em 1%; vertical-align:top;" /><figcaption class="figcaption">__FIGNUM__ {cap3}</figcaption></figure>'
+        return f'<div style="display:flex; flex-direction:row; gap:1em; justify-content:center;">{fig1}{fig2}{fig3}</div>'
+    content = re.sub(threeimg_pattern, replace_three_images, content, flags=re.DOTALL)
+
+
 
     # Process standard \includegraphics[opts]{path}
     pattern = r'\\includegraphics(\[[^\]]*\])?\{([^}]+)\}'
