@@ -697,12 +697,814 @@ def process_content(content, base_dir, repo_root=None):
             # Debug: check verbatim HTML newlines
     # Pre-process \item commands inside description environments
     # This runs BEFORE env_pattern to handle nested descriptions
+    # Pre-process \item commands inside description environments
+    # This runs BEFORE env_pattern to handle nested descriptions and itemize
+    # Pre-process \item commands inside description environments
+    # This runs BEFORE env_pattern to handle nested descriptions and itemize
     def process_description_items(m):
         body = m.group(1)
         items = []
         current_item = None
         depth = 0
         nested_buf = []
+        itemize_depth = 0
+        itemize_buf = []
+        for line in body.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("\begin{description}"):
+                if depth == 0:
+                    nested_buf = []
+                depth += 1
+                continue
+            if stripped.startswith("\end{description}"):
+                depth -= 1
+                if depth == 0:
+                    if current_item is not None:
+                        items.append(f"<li>{current_item}</li>")
+                        current_item = None
+                    nested_body = "\n".join(nested_buf)
+                    nested_items = []
+                    nested_current = None
+                    for nline in nested_body.split("\n"):
+                        nstripped = nline.strip()
+                        if nstripped.startswith("\item"):
+                            if nested_current is not None:
+                                nested_items.append(f"<li>{nested_current}</li>")
+                            nrest = nstripped[5:]
+                            if nrest.startswith(" "):
+                                nrest = nrest[1:]
+                            if nrest.startswith("["):
+                                nbe = nrest.find("]")
+                                if nbe != -1:
+                                    nlabel = nrest[1:nbe]
+                                    ndesc = nrest[nbe+1:].strip()
+                                    nested_current = f"<strong>{nlabel}</strong> {ndesc}"
+                                    continue
+                            nested_current = nrest.strip()
+                        elif nested_current is not None and nstripped:
+                            nested_current += f" {nstripped}"
+                    if nested_current is not None:
+                        nested_items.append(f"<li>{nested_current}</li>")
+                    items.append(f"<ul>{chr(10).join(nested_items)}</ul>")
+                    nested_buf = []
+                continue
+            if depth > 0:
+                nested_buf.append(stripped)
+                continue
+            # Handle nested itemize inside description items
+            if stripped.startswith("\begin{itemize}"):
+                itemize_depth += 1
+                itemize_buf = []
+                continue
+            if stripped.startswith("\end{itemize}"):
+                itemize_depth -= 1
+                if itemize_depth == 0:
+                    ul_items = []
+                    for iline in itemize_buf:
+                        istripped = iline.strip()
+                        if istripped.startswith("\item"):
+                            item_text = istripped[5:].strip()
+                            ul_items.append(f"<li>{item_text}</li>")
+                    if ul_items:
+                        ul_html = "\n".join(ul_items)
+                        if current_item is not None:
+                            current_item += f" <ul>{ul_html}</ul>"
+                        else:
+                            items.append(f"<ul>{ul_html}</ul>")
+                    itemize_buf = []
+                continue
+            if itemize_depth > 0:
+                itemize_buf.append(stripped)
+                continue
+            if stripped.startswith("\item"):
+                if current_item is not None:
+                    items.append(f"<li>{current_item}</li>")
+                rest = stripped[5:]
+                if rest.startswith(" "):
+                    rest = rest[1:]
+                if rest.startswith("["):
+                    bracket_end = rest.find("]")
+                    if bracket_end != -1:
+                        label = rest[1:bracket_end]
+                        desc_text = rest[bracket_end+1:].strip()
+                        current_item = f"<strong>{label}</strong> {desc_text}"
+                        continue
+                current_item = rest.strip()
+            elif current_item is not None and stripped:
+                current_item += f" {stripped}"
+        if current_item is not None:
+            items.append(f"<li>{current_item}</li>")
+        return "\n".join(items)
+    
+#!/usr/bin/env python3
+"""
+LaTeX to HTML converter for Mandelbulber manual.
+Converts .tex source files to a single-page HTML document with collapsible sidebar TOC.
+"""
+
+import os
+import re
+import shutil
+import argparse
+from pathlib import Path
+from html import escape
+
+# Heading ID counter
+_heading_counter = [0]
+
+# Section numbering counters
+_section_counter = [0]   # section number
+_subsection_counter = [0]  # subsection number
+_subsubsection_counter = [0]  # subsubsection number
+_paragraph_counter = [0]  # paragraph number
+_subparagraph_counter = [0]  # subparagraph number
+_figure_counter = [0]     # figure number
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Convert Mandelbulber LaTeX manual to HTML")
+    parser.add_argument("source", help="Path to mandelbulber2/manual directory")
+    parser.add_argument("output", help="Output directory for HTML files")
+    parser.add_argument("--index", action="store_true", help="Generate single-page HTML with TOC")
+    return parser.parse_args()
+
+
+def resolve_input(path, base_dir, repo_root=None):
+    """Resolve \input{path} to actual file content, recursively processing \input{} directives."""
+    # Skip makro.tex and preamble.tex — they contain \def macro definitions and
+    # LaTeX package declarations, not content
+    basename = path.replace("\\", "/").split("/")[-1]
+    if basename in ("makro", "makro.tex", "preamble", "preamble.tex"):
+        return ""
+    # Always resolve \input{} paths relative to repo root (LaTeX source uses absolute paths from repo)
+    if repo_root is not None:
+        target = Path(repo_root) / path
+    else:
+        target = Path(base_dir) / path
+    if not target.exists():
+        # Try with .tex extension
+        target_tex = Path(target).parent / (Path(target).stem + '.tex')
+        if target_tex.exists():
+            target = target_tex
+        else:
+            return f'<p class="error">File not found: {path}</p>'
+    with open(target, "r", encoding="utf-8") as f:
+        content = f.read()
+    # Strip % comment lines from .tex files (lines that begin with %)
+    # Only strip lines where % is the first non-whitespace character
+    content = '\n'.join(
+        line for line in content.split('\n')
+        if not line.lstrip().startswith('%')
+    )
+    # Recursively process \input{} directives in the included file
+    input_pattern = r'\\input\{([^}]+)\}'
+    def replace_input(m):
+        sub_path = m.group(1)
+        return resolve_input(sub_path, base_dir, repo_root=repo_root)
+    content = re.sub(input_pattern, replace_input, content)
+    # Also process \include{} directives
+    include_pattern = r'\\include\{([^}]+)\}'
+    def replace_include(m):
+        sub_path = m.group(1) + '.tex'
+        return resolve_input(sub_path, base_dir, repo_root=repo_root)
+    content = re.sub(include_pattern, replace_include, content)
+    # Fix: restore &amp; that lost its & prefix (e.g. in editors table)
+    
+    # Restore verbatim content AFTER paragraph wrapping
+
+    return content
+
+
+def _strip_latex_for_slug(text):
+    """Strip LaTeX commands from heading text for generating clean URL slugs."""
+    # Remove \emph{...}, \textbf{...}, \textit{...}, \texttt{...} etc.
+    # Use single backslash patterns to match LaTeX source text
+    text = re.sub(r'\\emph\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\textbf\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\textit\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\texttt\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\text\{[^}]*\}', r'', text)
+    # Remove any remaining \command{...} patterns
+    text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', text)
+    # Remove any remaining bare \commands, converting LaTeX escapes to their characters
+    def strip_bare_cmd(m):
+        name = m.group(1)
+        esc = {'_': '_', '#': '#', '$': '$', '%': '%', '!': '!', '&': '&', '\\': '\\', '/': '/'}
+        if name in esc:
+            return esc[name]
+        return ''
+    # First handle bare backslash + non-alphabetic (e.g. \_ \# \$)
+    text = re.sub(r'\\([^a-zA-Z])', lambda m: m.group(1), text)
+    # Then handle bare \commands (alphabetic)
+    text = re.sub(r'\\([a-zA-Z]+)', strip_bare_cmd, text)
+    # Strip HTML tags that were already processed by the command loop
+    text = re.sub(r'<[^>]*>', '', text)
+    # Strip quotes and newlines to avoid breaking HTML attribute matching
+    text = text.replace('"', '').replace("'", '').replace('{', '').replace('}', '')
+    text = text.replace('\n', ' ').replace('\t', ' ')
+    # Strip invalid HTML ID characters: &, ?, %, #, space, ., etc.
+    text = re.sub(r'[&?#%,;:!\'\.\-]', '', text)
+    # Remove leading/trailing dashes
+    text = text.strip('-')
+    return text
+
+
+def _make_heading_id(text, level):
+    """Generate a clean heading ID from raw LaTeX text."""
+    clean = _strip_latex_for_slug(text)
+    slug = clean.strip().lower().replace(' ', '-')
+    slug = re.sub(r'-+', '-', slug)
+    _heading_counter[0] += 1
+    return f"sec-{_heading_counter[0]}-{slug}"
+
+
+def _process_heading_text(raw):
+    """Process raw LaTeX text in a heading tag for display.
+    Converts \_, \&, \% etc. to their character equivalents.
+    Strips \emph{}, \textbf{}, \texttt{} etc. wrapping."""
+    text = raw
+    # Strip wrapping commands like \emph{...}, \textbf{...}, \textit{...}, \texttt{...}
+    for cmd in ['emph', 'textbf', 'textit', 'texttt', 'textsf', 'textup', 'textrm', 'bf', 'it', 'tt', 'rm', 'sf', 'large', 'Large', 'huge', 'scriptsize', 'footnotesize', 'tiny']:
+        text = re.sub(r'\\' + cmd + r'\{([^}]*)\}', r'\1', text)
+    # Process bare LaTeX escapes: \_ \& \% etc.
+    def unescape_cmd(m):
+        name = m.group(1)
+        esc = {'_': '_', '#': '#', '$': '$', '%': '%', '!': '!', '&': '&', '\\': '\\', '/': '/'}
+        if name in esc:
+            return esc[name]
+        return ''
+    text = re.sub(r'\\([^a-zA-Z])', lambda m: m.group(1), text)
+    text = re.sub(r'\\([a-zA-Z]+)', unescape_cmd, text)
+    return text
+
+
+def process_command(cmd_match):
+    """Process a LaTeX command and return HTML."""
+    cmd = cmd_match.group(1)
+    args = cmd_match.group(2) or ""
+    parts = [p.strip() for p in args.split(",") if p.strip()]
+
+    if cmd == "textbf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "textit":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "emph":
+        # Handle nested content (e.g., from \textbf{\emph{text}})
+        inner = parts[0] if parts else ""
+        # Strip any HTML tags that leaked in
+        inner = re.sub(r'<[^>]+>', '', inner)
+        return f"<em>{inner}</em>" if inner else ""
+    elif cmd == "verb":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "code":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "file":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "option":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "url":
+        return f'<a href="{parts[0]}">{parts[0]}</a>' if parts else ""
+    elif cmd == "email":
+        return f'<a href="mailto:{parts[0]}">{parts[0].replace("mailto:", "")}</a>' if parts else ""
+    elif cmd == "href":
+        # \href{url}{text} - parts[0] is url, parts[1] is text
+        if len(parts) >= 2:
+            display = parts[1].replace("mailto:", "")
+            return f'<a href="{parts[0]}">{display}</a>'
+        elif parts:
+            display = parts[0].replace("mailto:", "")
+            return f'<a href="{parts[0]}">{display}</a>'
+        return ""
+    elif cmd == "index":
+        return f'<span class="index-marker" data-index="{parts[0]}"></span>' if parts else ""
+    elif cmd == "ref":
+        return f'<a class="ref-link" href="#{parts[0]}">{parts[0]}</a>' if parts else ""
+    elif cmd == "pageref":
+        return f'<a class="ref-link" href="#{parts[0]}">page {parts[0]}</a>' if parts else ""
+    elif cmd == "label":
+        return f'<span id="{parts[0]}"></span>' if parts else ""
+    elif cmd == "newlabel":
+        return ""
+    elif cmd == "vspace":
+        return f'<div style="height: {parts[0]};"></div>' if parts else ""
+    elif cmd == "hspace":
+        return f'<span style="width: {parts[0]}; display: inline-block;"></span>' if parts else ""
+    elif cmd == "specialrule":
+        # \specialrule{thickness}{above}{below} - horizontal rule
+        if len(parts) >= 1:
+            thickness = parts[0]
+            return f'<hr style="height:{thickness}; margin:0.5em 0;"/>'
+        return ""
+    elif cmd == "section":
+        if not parts:
+            return ""
+        _section_counter[0] += 1
+        _subsection_counter[0] = 0
+        _subsubsection_counter[0] = 0
+        _figure_counter[0] = 0  # Reset figure counter for new section
+        sec_num = f"{_section_counter[0]}"
+        rid = sec_num.replace('.', '-')
+        return f"<h1 id='{rid}'>{sec_num}. {_process_heading_text(args)}</h1>"
+    elif cmd == "subsection":
+        if not parts:
+            return ""
+        _subsection_counter[0] += 1
+        _subsubsection_counter[0] = 0
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}"
+        rid = sec_num.replace('.', '-')
+        return f"<h2 id='{rid}'>{sec_num}. {_process_heading_text(args)}</h2>"
+    elif cmd == "subsubsection":
+        if not parts:
+            return ""
+        _subsubsection_counter[0] += 1
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}"
+        rid = sec_num.replace('.', '-')
+        return f"<h3 id='{rid}'>{sec_num}. {_process_heading_text(args)}</h3>"
+    elif cmd == "paragraph":
+        if not parts:
+            return ""
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}.{_paragraph_counter[0]}"
+        _paragraph_counter[0] += 1
+        rid = sec_num.replace('.', '-')
+        # Strip \emph{} even when inner content has HTML tags from prior iterations
+        text = re.sub(r'\\emph\{([^}]*(?:\{[^}]*\})?[^}]*)\}', lambda m: re.sub(r'<[^>]+>', '', m.group(1)), parts[0])
+        return f"<h4 id='{rid}'>{_process_heading_text(text)}</h4>"
+    elif cmd == "subparagraph":
+        if not parts:
+            return ""
+        sec_num = f"{_section_counter[0]}.{_subsection_counter[0]}.{_subsubsection_counter[0]}.{_paragraph_counter[0]}.{_subparagraph_counter[0]}"
+        _subparagraph_counter[0] += 1
+        rid = sec_num.replace('.', '-')
+        return f"<h5 id='{rid}'>{_process_heading_text(parts[0])}</h5>"
+    elif cmd == "textcolor":
+        # \textcolor{color}{text} - parts[0] is color, parts[1] is text
+        if len(parts) >= 2:
+            return f'<span style="color:{parts[0]}">{parts[1]}</span>'
+        elif parts:
+            return f'<span style="color:{parts[0]}">{parts[0]}</span>'
+        return ""
+    elif cmd == "color":
+        if parts:
+            return f'<span style="color:{parts[0]}">'
+        return ""
+    elif cmd == "textsc":
+        return f"<span style='font-variant:small-caps'>{parts[0]}</span>" if parts else ""
+    elif cmd == "texttt":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "tt":
+        return f"<code>{parts[0]}</code>" if parts else ""
+    elif cmd == "bf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "it":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "text":
+        # \text{...} in math mode - just return the content
+        return parts[0] if parts else ""
+    elif cmd == "mathrm":
+        # \mathrm{...} in math mode - just return the content
+        return parts[0] if parts else ""
+    elif cmd == "mathbf":
+        return f"<strong>{parts[0]}</strong>" if parts else ""
+    elif cmd == "mathit":
+        return f"<em>{parts[0]}</em>" if parts else ""
+    elif cmd == "textsuperscript":
+        return f"<sup>{parts[0]}</sup>" if parts else ""
+    elif cmd == "textsubscript":
+        return f"<sub>{parts[0]}</sub>" if parts else ""
+    elif cmd == "smallcaps":
+        return f"<span style='font-variant:small-caps'>{parts[0]}</span>" if parts else ""
+    elif cmd == "underline":
+        return f"<u>{parts[0]}</u>" if parts else ""
+    elif cmd == "sout":
+        return f"<s>{parts[0]}</s>" if parts else ""
+    elif cmd == "textrm":
+        return parts[0] if parts else ""
+    elif cmd == "large":
+        return f"<span style='font-size:1.2em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "Large":
+        return f"<span style='font-size:1.5em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "huge":
+        return f"<span style='font-size:1.8em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "scriptsize":
+        return f"<span style='font-size:0.8em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "footnotesize":
+        return f"<span style='font-size:0.9em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "tiny":
+        return f"<span style='font-size:0.7em'>{parts[0]}</span>" if parts else ""
+    elif cmd == "rm":
+        return parts[0] if parts else ""
+    elif cmd == "sf":
+        return f"<span style='font-family:sans-serif'>{parts[0]}</span>" if parts else ""
+    elif cmd == "textsf":
+        return f"<span style='font-family:sans-serif'>{parts[0]}</span>" if parts else ""
+    elif cmd == "textup":
+        return parts[0] if parts else ""
+    elif cmd == "frac":
+        if len(parts) >= 2:
+            return f"<sup>{parts[0]}</sup>/<sub>{parts[1]}</sub>"
+        return parts[0] if parts else ""
+    elif cmd == "sqrt":
+        return f"<sup>&radic;({parts[0]})</sup>" if parts else ""
+    elif cmd == "begin":
+        return f"<span class='begin-{parts[0]}'>" if parts else ""
+    elif cmd == "end":
+        return "</span>" if parts else ""
+    elif cmd == "textgreater":
+        return "&gt;"
+    elif cmd == "textless":
+        return "\\"
+    elif cmd == "textperiodcentered":
+        return "&middot;"
+    elif cmd == "textvisiblespace":
+        return "&#x2423;"
+    elif cmd == "textasciicircum":
+        return "&#x2038;"
+    elif cmd == "textbackslash":
+        return "\\\\"
+    elif cmd == "textasciitilde":
+        return "&#x007E;"
+    elif cmd == "textem":
+        return "&#x0153;"
+    elif cmd == "textonehalf":
+        return "1.5"
+    elif cmd == "textonequarter":
+        return "0.25"
+    elif cmd == "textthreequarters":
+        return "0.75"
+    elif cmd == "textfractionsolidus":
+        return "/"
+    elif cmd == "texttrademark":
+        return "&#x2122;"
+    elif cmd == "textregistered":
+        return "&#x00AE;"
+    elif cmd == "textcopyright":
+        return "&#x00A9;"
+    elif cmd == "textbar":
+        return "&#x00A6;"
+    elif cmd == "textbraceleft":
+        return "{"
+    elif cmd == "textbraceright":
+        return "}"
+
+
+def process_image_macro(content, repo_root=None):
+    """Process \\includegraphics[opts]{path} and custom \\simpleImageWithCaption{Type}{path}."""
+
+    # Map custom macro suffixes to width percentages
+    width_map = {
+        'FullWidth': '',
+        '75Width': '75%',
+        'HalfWidth': '50%',
+        'ThirdWidth': '33%',
+        'SmallWidth': '200px',
+    }
+
+    # Process custom \simpleImageWithCaption{Type}{path} macros
+    custom_pattern = r'\\simpleImageWithCaption(75Width|FullWidth|HalfWidth|SmallWidth|ThirdWidth)\{([^}]+)\}\s*\{([^}]+)\}'
+    def replace_custom_image(m):
+        suffix = m.group(1)
+        path = m.group(2)
+        caption = m.group(3) if m.group(3) else ""
+        width = width_map.get(suffix, '')
+        # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
+        html_path = path.replace("\\", "/")
+        img_style = f"max-width:{width}; height:auto; display:block; margin:1em auto;" if width else "max-width:100%; height:auto; display:block; margin:1em auto;"
+        img_html = f'<img src="{html_path}" alt="{path}" style="{img_style}" />'
+        if caption:
+            return f'<figure class="manual-figure">{img_html}<figcaption class="figcaption">__FIGNUM__ {caption}</figcaption></figure>'
+        return img_html
+
+    content = re.sub(custom_pattern, replace_custom_image, content)
+
+    # Process \\twoImagesWithTwoCaptionsFullWidth{path1}{cap1}{lbl1}{path2}{cap2}{lbl2}{opts}
+    twoimg_pattern = r'\\twoImagesWithTwoCaptionsFullWidth\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}\s*\{[^}]*\}'
+    def replace_two_images(m):
+        path1, cap1, path2, cap2 = m.group(1), m.group(2), m.group(3), m.group(4)
+        h1 = path1.replace("\\", "/")
+        h2 = path2.replace("\\", "/")
+        fig1 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h1}" alt="{path1}" style="max-width:100%; height:auto; display:block; margin:0.5em 0; " /><figcaption class="figcaption">__FIGNUM__ {cap1}</figcaption></figure>'
+        fig2 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h2}" alt="{path2}" style="max-width:100%; height:auto; display:block; margin:0.5em 0; " /><figcaption class="figcaption">__FIGNUM__ {cap2}</figcaption></figure>'
+        return f'<div style="display:flex; flex-direction:row; gap:0.5em; justify-content:center;">{fig1}{fig2}</div>'
+    content = re.sub(twoimg_pattern, replace_two_images, content, flags=re.DOTALL)
+
+    # Process \\threeImagesWithTwoCaptionsFullWidth{path1}{cap1}{lbl1}{path2}{cap2}{lbl2}{path3}{cap3}{lbl3}
+    threeimg_pattern = r'\\threeImagesWithTwoCaptionsFullWidth\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}\s*\{([^}]+)\}\s*\{([^}]+)\}\s*\{[^}]*\}'
+    def replace_three_images(m):
+        path1, cap1 = m.group(1), m.group(2)
+        path2, cap2 = m.group(3), m.group(4)
+        path3, cap3 = m.group(5), m.group(6)
+        h1 = path1.replace("\\", "/")
+        h2 = path2.replace("\\", "/")
+        h3 = path3.replace("\\", "/")
+        fig1 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h1}" alt="{path1}" style="max-width:100%; height:auto; display:block; margin:0.5em 0; " /><figcaption class="figcaption">__FIGNUM__ {cap1}</figcaption></figure>'
+        fig2 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h2}" alt="{path2}" style="max-width:100%; height:auto; display:block; margin:0.5em 0; " /><figcaption class="figcaption">__FIGNUM__ {cap2}</figcaption></figure>'
+        fig3 = f'<figure class="manual-figure" style="display:flex; flex-direction:column; flex:1; align-items:center;"><img src="{h3}" alt="{path3}" style="max-width:100%; height:auto; display:block; margin:0.5em 0; " /><figcaption class="figcaption">__FIGNUM__ {cap3}</figcaption></figure>'
+        return f'<div style="display:flex; flex-direction:row; gap:0.5em; justify-content:center;">{fig1}{fig2}{fig3}</div>'
+    content = re.sub(threeimg_pattern, replace_three_images, content, flags=re.DOTALL)
+
+
+
+    # Process standard \includegraphics[opts]{path}
+    pattern = r'\\includegraphics(\[[^\]]*\])?\{([^}]+)\}'
+    def replace_image(m):
+        opts = m.group(1) or ""
+        path = m.group(2)
+        width = ""
+        height = ""
+        # Handle width=0.3\linewidth style
+        width_match = re.search(r"width=([\d.]+)(\\?linewidth|in|pt|px)?", opts)
+        if width_match:
+            val = float(width_match.group(1))
+            unit = width_match.group(2) or 'linewidth'
+            if 'linewidth' in unit:
+                # \linewidth = 100% of line width
+                width = '100%'
+            elif 'in' in unit:
+                # Convert inches to pixels (96 DPI)
+                width = str(int(val * 96))
+            else:
+                width = str(int(val))
+        height_match = re.search(r"height=([\d.]+)(in|pt|px)?", opts)
+        if height_match:
+            val = float(height_match.group(1))
+            unit = height_match.group(2) or 'pt'
+            if 'in' in unit:
+                # Convert inches to pixels (96 DPI)
+                height = str(int(val * 96))
+            elif 'pt' in unit:
+                # Convert points to pixels (1pt = 1.333px at 96 DPI)
+                height = str(int(val * 4 / 3))
+            else:
+                height = str(int(val))
+        # Images are at img/manual/media/ relative to repo root (same as LaTeX source)
+        html_path = path.replace("\\", "/")
+        # Auto-detect file extension if path has no extension
+        if repo_root and '.' not in html_path.split('/')[-1]:
+            for ext in ['.png', '.jpg', '.jpeg', '.svg', '.gif', '.pdf']:
+                candidate = html_path + ext
+                full = Path(repo_root) / candidate
+                if full.exists():
+                    html_path = candidate
+                    break
+        # Use style-based sizing (consistent with \simpleImageWithCaption)
+        style_parts = ['height:auto', 'display:block', 'margin:1em auto']
+        # Sound images use 50% width; other images use pixel width if available
+        if 'sound' in path.lower():
+            style_parts.insert(0, 'max-width:50%')
+        elif width:
+            # Avoid double suffix (e.g., '100%px')
+            if isinstance(width, str) and '%' in width:
+                style_parts.insert(0, f'max-width:{width}')
+            else:
+                style_parts.insert(0, f'max-width:{width}px')
+        else:
+            style_parts.insert(0, 'max-width:100%')
+        style = '; '.join(style_parts)
+        return '<img src="{}" alt="{}" style="{}" />'.format(html_path, path, style)
+    content = re.sub(pattern, replace_image, content)
+    return content
+
+
+def process_content(content, base_dir, repo_root=None):
+    """Main content processing function."""
+    # Math protection registry - populated after file inclusion
+    _math_registry = {}
+    _math_counter = [0]
+    
+    # Process \input{} commands first
+    input_pattern = r'\\input\{([^}]+)\}'
+    def replace_input(m):
+        path = m.group(1)
+        return resolve_input(path, base_dir, repo_root=repo_root)
+    content = re.sub(input_pattern, replace_input, content)
+
+    # Process \include{} commands
+    include_pattern = r'\\include\{([^}]+)\}'
+    def replace_include(m):
+        path = m.group(1) + ".tex"
+        return resolve_input(path, base_dir, repo_root=repo_root)
+    content = re.sub(include_pattern, replace_include, content)
+
+    # Strip LaTeX grouping parens around $ math like ($ ... $)
+    # These are common in mandelbulber source and cause ($ artifacts
+    content = re.sub(r'\(\$', '$', content)
+    content = re.sub(r'\$\)', '$', content)
+    
+    # =====================================================================
+    # PROTECT MATH CONTENT - extract \[...\], \(...\), and $...$ before processing
+    # Must run AFTER file inclusion so math from included files is captured
+    # =====================================================================
+    BS = chr(92)  # backslash character
+    def extract_display_math(text):
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == BS and i + 1 < len(text) and text[i+1] == '[':
+                j = i + 2
+                depth = 1
+                while j < len(text) and depth > 0:
+                    if text[j] == BS and j + 1 < len(text) and text[j+1] == '[':
+                        depth += 1
+                        j += 1
+                    elif text[j] == BS and j + 1 < len(text) and text[j+1] == ']':
+                        depth -= 1
+                        j += 1
+                    j += 1
+                if depth == 0:
+                    math_content = text[i+2:j-2]
+                    _math_counter[0] += 1
+                    key = f"__MATH_PLACEHOLDER_{_math_counter[0]}__"
+                    _math_registry[key] = ("display", math_content)
+                    result.append(key)
+                    i = j
+                    continue
+            result.append(text[i])
+            i += 1
+        return ''.join(result)
+    
+    def extract_inline_math(text):
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == BS and i + 1 < len(text) and text[i+1] == '(':
+                j = i + 2
+                depth = 1
+                while j < len(text) and depth > 0:
+                    if text[j] == BS and j + 1 < len(text) and text[j+1] == '(':
+                        depth += 1
+                        j += 1
+                    elif text[j] == BS and j + 1 < len(text) and text[j+1] == ')':
+                        depth -= 1
+                        j += 1
+                    j += 1
+                if depth == 0:
+                    math_content = text[i+2:j-2]
+                    _math_counter[0] += 1
+                    key = f"__MATH_PLACEHOLDER_{_math_counter[0]}__"
+                    _math_registry[key] = ("inline", math_content)
+                    result.append(key)
+                    i = j
+                    continue
+            result.append(text[i])
+            i += 1
+        return ''.join(result)
+    
+    def extract_dollar_math(text):
+        # Conservative: $ delimiters should only capture short inline math
+        # Allow at most 1 newline and content < 200 chars to avoid capturing paragraphs
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == '$' and (i + 1 >= len(text) or text[i+1] != '$'):
+                j = i + 1
+                newline_count = 0
+                while j < len(text):
+                    if text[j] == '\n':
+                        newline_count += 1
+                        if newline_count > 1:
+                            break
+                    if text[j] == '$' and (j + 1 >= len(text) or text[j+1] != '$'):
+                        break
+                    j += 1
+                if j < len(text) and text[j] == '$':
+                    math_content = text[i+1:j]
+                    # Only protect if content is short (inline math)
+                    if len(math_content) < 200:
+                        _math_counter[0] += 1
+                        key = f"__MATH_PLACEHOLDER_{_math_counter[0]}__"
+                        _math_registry[key] = ("inline", math_content)
+                        result.append(key)
+                        i = j + 1
+                        continue
+            result.append(text[i])
+            i += 1
+        return ''.join(result)
+    
+    content = extract_display_math(content)
+    content = extract_inline_math(content)
+    content = extract_dollar_math(content)
+    
+    # Extract \newcommand definitions to a dict, then replace bare \mX refs
+    metadata = {}
+    
+    def extract_command_value(content, start_pos, cmd_name):
+        """Find the value after \\newcommand{\\cmd_name}{ by counting braces.
+        
+        start_pos is already past the opening { of the value, so depth starts at 1.
+        """
+        depth = 1
+        i = start_pos
+        while i < len(content):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    value = content[start_pos:i]
+                    value = value.strip()
+                    if value.startswith('{') and value.endswith('}'):
+                        value = value[1:-1]
+                    return value
+            i += 1
+        return None
+    
+    # Extract \newcommand{\mX}{value} for metadata commands (m*)
+    pos = 0
+    while pos < len(content):
+        m = re.search(r'\\newcommand{\\(m[a-zA-Z]+)}{', content[pos:])
+        if not m:
+            break
+        cmd_name = m.group(1)
+        value_start = pos + m.end()
+        value = extract_command_value(content, value_start, cmd_name)
+        if value is not None:
+            metadata[cmd_name] = value
+            # Remove this definition from content
+            # Find the end of the full \newcommand{\cmd_name}{value}
+            end_pos = value_start
+            depth = 1  # The opening { of the value was already consumed by the regex
+            for j in range(value_start, len(content)):
+                if content[j] == '{':
+                    depth += 1
+                elif content[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end_pos = j + 1
+                        break
+            match_start = pos + m.start()
+            content = content[:match_start] + content[end_pos:]
+        pos = pos + m.start() + 1
+    
+    # Also extract \renewcommand for things like \baselinestretch
+    pos = 0
+    while pos < len(content):
+        m = re.search(r'\\renewcommand{\\([a-zA-Z]+)}{', content[pos:])
+        if not m:
+            break
+        cmd_name = m.group(1)
+        value_start = pos + m.end()
+        value = extract_command_value(content, value_start, cmd_name)
+        if value is not None:
+            metadata[cmd_name] = value
+            # Find the end of the full \renewcommand{\cmd_name}{value}
+            end_pos = value_start
+            depth = 1  # The opening { of the value was already consumed by the regex
+            for j in range(value_start, len(content)):
+                if content[j] == '{':
+                    depth += 1
+                elif content[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end_pos = j + 1
+                        break
+            # Use match start position, not search start position
+            match_start = pos + m.start()
+            content = content[:match_start] + content[end_pos:]
+        pos = pos + m.start() + 1
+    
+    # After extracting renewcommand values, strip any leftover baselinestretch
+    # (it's a formatting command, not content)
+    content = re.sub(r'\\baselinestretch(\\)?\s*', '', content)
+    
+    # Extract verbatim environments BEFORE macro replacement to protect their content
+    _verbatim_registry = {}
+    _verbatim_counter = [0]
+    verbatim_pattern = r'\\begin\{verbatim\}(?:\[[^\]]*\])?(.*?)\\end\{verbatim\}'
+    def protect_verbatim(m):
+        _verbatim_counter[0] += 1
+        key = f'__VERBATIM_{_verbatim_counter[0]}__'
+        _verbatim_registry[key] = m.group(1)
+        return key
+    content = re.sub(verbatim_pattern, protect_verbatim, content, flags=re.DOTALL)
+    
+    # Replace bare \\mX commands with extracted values
+    for key, value in metadata.items():
+        # Escape backslashes in value for use in re.sub replacement string
+        escaped_value = value.replace('\\', '\\\\')
+        # Also unescape & in value to prevent double-escaping
+        escaped_value = escaped_value.replace('&amp;', '&').replace('&', '&amp;')
+        # Replace \\mX{...} first (with arguments), then bare \\mX
+        # Use brace-aware matching for \\mX{...}
+        pattern_x = r'\\' + re.escape(key) + r'\{'
+        def replace_mx_braced(m):
+            return escaped_value
+        content = re.sub(pattern_x, replace_mx_braced, content)
+        content = re.sub(r'\\' + re.escape(key) + r'\s*', escaped_value, content)
+
+    # Restore protected verbatim environments
+            # Debug: check verbatim HTML newlines
+    # Pre-process \item commands inside description environments
+    # This runs BEFORE env_pattern to handle nested descriptions
+    # Pre-process \item commands inside description environments
+    # This runs BEFORE env_pattern to handle nested descriptions and itemize
+    def process_description_items(m):
+        body = m.group(1)
+        items = []
+        current_item = None
+        depth = 0
+        nested_buf = []
+        itemize_depth = 0
+        itemize_buf = []
         for line in body.split("\n"):
             stripped = line.strip()
             if stripped.startswith("\begin{description}"):
@@ -745,6 +1547,32 @@ def process_content(content, base_dir, repo_root=None):
             if depth > 0:
                 nested_buf.append(stripped)
                 continue
+            # Handle nested itemize inside description items
+            if stripped.startswith("\begin{itemize}"):
+                itemize_depth += 1
+                itemize_buf = []
+                continue
+            if stripped.startswith("\end{itemize}"):
+                itemize_depth -= 1
+                if itemize_depth == 0:
+                    # Convert buffered itemize items to <ul><li>
+                    ul_items = []
+                    for iline in itemize_buf:
+                        istripped = iline.strip()
+                        if istripped.startswith("\item"):
+                            item_text = istripped[5:].strip()
+                            ul_items.append(f"<li>{item_text}</li>")
+                    if ul_items:
+                        ul_html = "\n".join(ul_items)
+                        if current_item is not None:
+                            current_item += f" <ul>{ul_html}</ul>"
+                        else:
+                            items.append(f"<ul>{ul_html}</ul>")
+                    itemize_buf = []
+                continue
+            if itemize_depth > 0:
+                itemize_buf.append(stripped)
+                continue
             if stripped.startswith("\item"):
                 if current_item is not None:
                     items.append(f"<li>{current_item}</li>")
@@ -764,13 +1592,27 @@ def process_content(content, base_dir, repo_root=None):
         if current_item is not None:
             items.append(f"<li>{current_item}</li>")
         return "\n".join(items)
-    
-    # Process description environments with nested support
-    desc_pattern = r"\\begin\{description\}(.*?)\\end\{description\}"
-    content = re.sub(desc_pattern, process_description_items, content, flags=re.DOTALL)
-    # Remove the processed description env markers
-    content = re.sub(r"\\begin\{description\}", "", content)
-    content = re.sub(r"\\end\{description\}", "", content)
+        # Process description environments with nested support
+        # Scan for matching begin/end pairs to handle nesting
+        desc_blocks = []
+        desc_depth = 0
+        desc_start = None
+        for dm in re.finditer(r"\\\\begin\{description\}|\\\\end\{description\}", content):
+            if dm.group().startswith("\\\\begin"):
+                if desc_depth == 0:
+                    desc_start = dm.end()
+                desc_depth += 1
+            else:
+                desc_depth -= 1
+                if desc_depth == 0 and desc_start is not None:
+                    desc_blocks.append((desc_start, dm.start()))
+                    desc_start = None
+        # Process from end to preserve positions
+        for s, e in reversed(desc_blocks):
+            body = content[s:e]
+            result = process_description_items(type("m", (), {"group": lambda i: body})())
+            content = content[:s - len("\\\\begin{description}")] + result + content[e + len("\\\\end{description}"):]  
+
 
 
     env_pattern = r'\\begin\{([^}]+)\}(?:\[[^\]]*\])?(?:\{(?:(?:[^{}]*\{[^{}]*\})*[^{}]*)\})?(.*?)\\end\{\1\}'
